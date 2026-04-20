@@ -256,7 +256,7 @@ async def run_crawler():
         if all_products:
             print("\n🚀 스프레드시트 업데이트 시작...")
             try:
-                scopes = ["https://puzzle.googleapis.com/auth/spreadsheets", "https://puzzle.googleapis.com/auth/drive"]
+                scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
                 creds = Credentials.from_service_account_file('secrets.json', scopes=scopes)
                 gc = gspread.authorize(creds)
                 
