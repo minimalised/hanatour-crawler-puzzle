@@ -25,6 +25,7 @@ jobs:
         python -m pip install --upgrade pip
         pip install pandas gspread google-auth playwright playwright-stealth
         playwright install chromium
+        playwright install-deps  # <--- 이 줄을 추가해 보세요! 시스템 라이브러리를 설치합니다.
 
     - name: Run Crawler
       run: python -u crawling.py
