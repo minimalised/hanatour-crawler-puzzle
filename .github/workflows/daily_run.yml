@@ -2,9 +2,10 @@ name: Daily Hanatour Crawling
 
 on:
   schedule:
-    # UTC 00:00은 한국 시간 오전 9시입니다.
-    - cron: '0 0 * * *'
-  workflow_dispatch: # 우리가 원할 때 수동으로 '실행' 버튼을 누르기 위해 추가합니다.
+    # UTC 23:00은 한국 시간(KST) 다음날 오전 8시입니다.
+    # 분 시 일 월 요일
+    - cron: '0 23 * * *'
+  workflow_dispatch: 
 
 jobs:
   build:
@@ -26,4 +27,4 @@ jobs:
         playwright install chromium
 
     - name: Run Crawler
-      run: python crawling_ydt.py # 실제 본인의 파이썬 파일명으로 적으세요!
+      run: python crawling_ydt.py
