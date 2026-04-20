@@ -256,29 +256,30 @@ async def run_crawler():
         if all_products:
             print("\n🚀 스프레드시트 업데이트 시작...")
             try:
-                # 1. 인증 설정 (파일 이름은 secrets.json 고정)
                 scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
                 creds = Credentials.from_service_account_file('secrets.json', scopes=scopes)
                 gc = gspread.authorize(creds)
                 
-                # 2. 본인의 시트 정보 입력 (매우 중요!)
-                # 주소창에서 /d/ 뒤의 값을 복사해 넣으세요.
                 spreadsheet_id = "1mH51VHs4y0FgClkUBvZgw7oY3Yv7gQBA_a3um9uhX0I" 
-                # 데이터를 넣을 탭 이름을 입력하세요 (예: 'db' 또는 'Sheet1')
                 worksheet_name = "github" 
 
                 doc = gc.open_by_key(spreadsheet_id)
                 sheet = doc.worksheet(worksheet_name)
 
-                # 3. 데이터 준비 및 업로드
+                # 1. 데이터프레임 변환
                 df = pd.DataFrame(all_products)
                 
-                # 기존 내용 삭제
+                # 2. 기존 데이터 완전 삭제 (포맷 제외 내용만 삭제)
                 sheet.clear()
-                # 헤더와 데이터 함께 전송
-                sheet.update([df.columns.values.tolist()] + df.values.tolist())
                 
-                print(f"\n🎉 성공! 총 {len(df)}개 데이터를 '{worksheet_name}' 시트에 저장했습니다.")
+                # 3. 헤더와 데이터를 리스트로 변환하여 A1부터 한 번에 업데이트
+                # 리스트의 첫 번째 요소는 컬럼명(헤더), 그 뒤로 데이터가 붙습니다.
+                data_to_upload = [df.columns.values.tolist()] + df.values.tolist()
+                
+                # sheet.update() 사용 (범위를 지정하지 않으면 A1부터 자동으로 채워짐)
+                sheet.update(data_to_upload)
+                
+                print(f"\n🎉 성공! 기존 데이터를 삭제하고 총 {len(df)}개의 새 데이터를 '{worksheet_name}' 시트에 갱신했습니다.")
             
             except Exception as e:
                 print(f"❌ 시트 저장 에러: {e}")
