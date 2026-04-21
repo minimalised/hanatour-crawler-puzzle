@@ -250,39 +250,50 @@ async def run_crawler():
                 print(f"❌ {current_url} 에러: {e}")
                 continue
 
-        # --------------------------------------------------
-        # 구글 스프레드시트 적재 (수정된 섹션)
+       # --------------------------------------------------
+        # 구글 스프레드시트 적재 (멀티 업데이트 버전)
         # --------------------------------------------------
         if all_products:
             print("\n🚀 스프레드시트 업데이트 시작...")
+            
+            # 업데이트할 시트 ID 리스트 (여기에 계속 추가 가능)
+            target_spreadsheet_ids = [
+                "1mH51VHs4y0FgClkUBvZgw7oY3Yv7gQBA_a3um9uhX0I",
+                "1JgWk9PYT6LG_1GnPdpVY0mZavcHXDWRSrzdE0lVmjj4",
+                "1Hoq0N88mestsHXbIOjwue3OctXf7dvKkx99eieYFhAY"
+                "1BK4xUHQFrLjLTn6vE0jSuwqMvSU7ZMKIV-nPvmySPx8"
+            ]
+            worksheet_name = "github"
+
             try:
                 scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
                 creds = Credentials.from_service_account_file('secrets.json', scopes=scopes)
                 gc = gspread.authorize(creds)
-                
-                spreadsheet_id = "1mH51VHs4y0FgClkUBvZgw7oY3Yv7gQBA_a3um9uhX0I" 
-                worksheet_name = "github" 
 
-                doc = gc.open_by_key(spreadsheet_id)
-                sheet = doc.worksheet(worksheet_name)
-
-                # 1. 데이터프레임 변환
+                # 1. 데이터프레임 변환 (공통 데이터)
                 df = pd.DataFrame(all_products)
-                
-                # 2. 기존 데이터 완전 삭제 (포맷 제외 내용만 삭제)
-                sheet.clear()
-                
-                # 3. 헤더와 데이터를 리스트로 변환하여 A1부터 한 번에 업데이트
-                # 리스트의 첫 번째 요소는 컬럼명(헤더), 그 뒤로 데이터가 붙습니다.
                 data_to_upload = [df.columns.values.tolist()] + df.values.tolist()
-                
-                # sheet.update() 사용 (범위를 지정하지 않으면 A1부터 자동으로 채워짐)
-                sheet.update(data_to_upload)
-                
-                print(f"\n🎉 성공! 기존 데이터를 삭제하고 총 {len(df)}개의 새 데이터를 '{worksheet_name}' 시트에 갱신했습니다.")
-            
+
+                # 2. 리스트에 있는 모든 시트에 순차적으로 업로드
+                for spreadsheet_id in target_spreadsheet_ids:
+                    try:
+                        doc = gc.open_by_key(spreadsheet_id)
+                        sheet = doc.worksheet(worksheet_name)
+
+                        # 기존 데이터 삭제 후 업데이트
+                        sheet.clear()
+                        sheet.update(data_to_upload)
+                        
+                        print(f"✅ 성공: [{doc.title}] 시트에 {len(df)}개 데이터 갱신 완료")
+                        
+                    except Exception as sheet_error:
+                        print(f"⚠️ {spreadsheet_id} 시트 업데이트 실패: {sheet_error}")
+                        # 하나의 시트가 실패해도 다음 시트는 계속 진행함
+
+                print(f"\n🎉 모든 시트 업데이트 프로세스가 완료되었습니다.")
+
             except Exception as e:
-                print(f"❌ 시트 저장 에러: {e}")
+                print(f"❌ 구글 인증 또는 데이터 처리 에러: {e}")
         
         await browser.close()
 
