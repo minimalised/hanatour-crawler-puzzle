@@ -171,7 +171,16 @@ async def run_crawler():
 "https://puzzle.hanatour.com/package/major-products?cntryCd=US&areaCd=HE&cityNm=%EB%AF%B8%EA%B5%AD%EB%8F%99%EB%B6%80",
 "https://puzzle.hanatour.com/package/major-products?cntryCd=US&catgProdAttrCd=p01&cityCd=DFWATLHOUMSY&cityNm=%EB%AF%B8%EA%B5%AD%EC%A4%91%EB%82%A8%EB%B6%80",
 "https://puzzle.hanatour.com/package/major-products?areaCd=HC&cntryNm=%EC%BA%90%EB%82%98%EB%8B%A4",
-"https://puzzle.hanatour.com/package/major-products?areaCd=SS&cityNm=%EC%A4%91%EB%82%A8%EB%AF%B8"
+"https://puzzle.hanatour.com/package/major-products?areaCd=SS&cityNm=%EC%A4%91%EB%82%A8%EB%AF%B8",
+"https://puzzle.hanatour.com/package/major-products?pkgServiceCd=DP&cityNm=%EC%A0%84%EB%9D%BC%EB%B6%81%EB%8F%84&scods=B6&sort=RPRS_SORT5&prodBrndCds=22&cityCatgAreaDvCd=S",
+"https://puzzle.hanatour.com/package/major-products?pkgServiceCd=DP&cityNm=%EC%A0%84%EB%9D%BC%EB%82%A8%EB%8F%84&scods=B5&sort=RPRS_SORT5&prodBrndCds=22&cityCatgAreaDvCd=S",
+"https://puzzle.hanatour.com/package/major-products?pkgServiceCd=DP&cityNm=%EA%B0%95%EC%9B%90%EB%8F%84&scods=B1&sort=RPRS_SORT5&prodBrndCds=22&cityCatgAreaDvCd=S",
+"https://puzzle.hanatour.com/package/major-products?pkgServiceCd=DP&cityNm=%EA%B2%BD%EC%83%81%EB%B6%81%EB%8F%84&scods=B4&sort=RPRS_SORT5&prodBrndCds=22&cityCatgAreaDvCd=S",
+"https://puzzle.hanatour.com/package/major-products?pkgServiceCd=DP&cityNm=%EA%B2%BD%EC%83%81%EB%82%A8%EB%8F%84&scods=B3&sort=RPRS_SORT5&prodBrndCds=22&cityCatgAreaDvCd=S",
+"https://puzzle.hanatour.com/package/major-products?pkgServiceCd=DP&cityNm=%EC%B6%A9%EC%B2%AD%EB%B6%81%EB%8F%84&scods=B8&sort=RPRS_SORT5&prodBrndCds=22&cityCatgAreaDvCd=S",
+"https://puzzle.hanatour.com/package/major-products?pkgServiceCd=DP&cityNm=%EC%B6%A9%EC%B2%AD%EB%82%A8%EB%8F%84&scods=B7&sort=RPRS_SORT5&prodBrndCds=22&cityCatgAreaDvCd=S",
+"https://puzzle.hanatour.com/package/major-products?pkgServiceCd=DP&cityNm=%EC%A0%9C%EC%A3%BC%EB%8F%84&scods=B9&sort=RPRS_SORT5&prodBrndCds=22&cityCatgAreaDvCd=S",
+"https://puzzle.hanatour.com/package/major-products?pkgServiceCd=DP&cityCd=AK3&cityNm=%EC%9A%B8%EB%A6%89%EA%B5%B0&scods&sort=RPRS_SORT5&cityCatgAreaDvCd=C"
         ]
 
         all_products = []
