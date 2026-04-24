@@ -228,50 +228,57 @@ async def run_crawler():
                         retry_count = 0
                     last_count = current_count
 
-                # 데이터 파싱 (수정본)
-final_items = await page.query_selector_all(".prod_list_wrap ul.type > li")
-for item in final_items:
-    try:
-        # 1. 'li' 바로 아래의 'inr.right' 영역만 특정합니다 (확장 영역 제외)
-        # Playwright의 CSS Selector에서 > 를 사용하여 직계 자식만 선택합니다.
-        main_info = await item.query_selector(":scope > .inr.right")
-        
-        # 만약 구조가 복잡하다면, 이미지 영역이 옆에 붙어 있는 경우만 추출하도록 필터링
-        img_check = await item.query_selector(":scope > .inr.img")
-        if not img_check or not main_info:
-            continue
+                # --- 데이터 파싱 영역 (수정 및 문법 보완) ---
+                try:
+                    final_items = await page.query_selector_all(".prod_list_wrap ul.type > li")
+                    for item in final_items:
+                        try:
+                            # 1. 직계 자식인 정보 영역(.inr.right)과 이미지 영역(.inr.img)만 타겟팅
+                            main_info = await item.query_selector(":scope > .inr.right")
+                            img_check = await item.query_selector(":scope > .inr.img")
+                            
+                            # 대표 상품 구조가 아니면(확장 영역이면) 건너뜀
+                            if not main_info or not img_check:
+                                continue
 
-        # 2. 추출 대상 요소를 main_info 범위 내로 한정합니다.
-        title_el = await main_info.query_selector(".item_title")
-        title = await title_el.inner_text() if title_el else "제목 없음"
+                            # 2. 정보 추출
+                            title_el = await main_info.query_selector(".item_title")
+                            title = await title_el.inner_text() if title_el else "제목 없음"
 
-        price_el = await main_info.query_selector(".price")
-        price_raw = await price_el.inner_text() if price_el else "0"
-        price = "".join(filter(str.isdigit, price_raw))
+                            price_el = await main_info.query_selector(".price")
+                            price_raw = await price_el.inner_text() if price_el else "0"
+                            price = "".join(filter(str.isdigit, price_raw))
 
-        img_el = await img_check.query_selector("img")
-        img_url = await img_el.get_attribute("src") if img_el else ""
-        if img_url and img_url.startswith("//"): 
-            img_url = "https:" + img_url
+                            img_el = await img_check.query_selector("img")
+                            img_url = await img_el.get_attribute("src") if img_el else ""
+                            if img_url and img_url.startswith("//"): 
+                                img_url = "https:" + img_url
 
-        all_products.append({
-            "지역": region_name,
-            "상품명": title.strip(),
-            "가격": int(price) if price else 0,
-            "이미지URL": img_url,
-            "URL": current_url
-        })
-    except Exception as e:
-        print(f"개별 상품 파싱 에러: {e}")
-        continue
+                            all_products.append({
+                                "지역": region_name,
+                                "상품명": title.strip(),
+                                "가격": int(price) if price else 0,
+                                "이미지URL": img_url,
+                                "URL": current_url
+                            })
+                        except Exception as e:
+                            print(f"개별 상품 파싱 에러: {e}")
+                            continue
+                except Exception as e:
+                    print(f"파싱 리스트 획득 에러: {e}")
 
-       # --------------------------------------------------
-        # 구글 스프레드시트 적재 (멀티 업데이트 버전)
+                print(f"✅ {region_name} 완료 ({len(all_products)}개 누적)")
+                await asyncio.sleep(5)
+
+            except Exception as e:
+                print(f"❌ {current_url} 접속 에러: {e}")
+                continue
+
+        # --------------------------------------------------
+        # 구글 스프레드시트 적재
         # --------------------------------------------------
         if all_products:
             print("\n🚀 스프레드시트 업데이트 시작...")
-            
-            # 업데이트할 시트 ID 리스트 (여기에 계속 추가 가능)
             target_spreadsheet_ids = [
                 "1mH51VHs4y0FgClkUBvZgw7oY3Yv7gQBA_a3um9uhX0I",
                 "1JgWk9PYT6LG_1GnPdpVY0mZavcHXDWRSrzdE0lVmjj4",
@@ -285,30 +292,21 @@ for item in final_items:
                 creds = Credentials.from_service_account_file('secrets.json', scopes=scopes)
                 gc = gspread.authorize(creds)
 
-                # 1. 데이터프레임 변환 (공통 데이터)
                 df = pd.DataFrame(all_products)
                 data_to_upload = [df.columns.values.tolist()] + df.values.tolist()
 
-                # 2. 리스트에 있는 모든 시트에 순차적으로 업로드
                 for spreadsheet_id in target_spreadsheet_ids:
                     try:
                         doc = gc.open_by_key(spreadsheet_id)
                         sheet = doc.worksheet(worksheet_name)
-
-                        # 기존 데이터 삭제 후 업데이트
                         sheet.clear()
                         sheet.update(data_to_upload)
-                        
-                        print(f"✅ 성공: [{doc.title}] 시트에 {len(df)}개 데이터 갱신 완료")
-                        
+                        print(f"✅ 성공: [{doc.title}] 갱신 완료")
                     except Exception as sheet_error:
-                        print(f"⚠️ {spreadsheet_id} 시트 업데이트 실패: {sheet_error}")
-                        # 하나의 시트가 실패해도 다음 시트는 계속 진행함
-
-                print(f"\n🎉 모든 시트 업데이트 프로세스가 완료되었습니다.")
+                        print(f"⚠️ {spreadsheet_id} 업데이트 실패: {sheet_error}")
 
             except Exception as e:
-                print(f"❌ 구글 인증 또는 데이터 처리 에러: {e}")
+                print(f"❌ 구글 시트 처리 에러: {e}")
         
         await browser.close()
 
