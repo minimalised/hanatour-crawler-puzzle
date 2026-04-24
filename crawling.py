@@ -228,36 +228,42 @@ async def run_crawler():
                         retry_count = 0
                     last_count = current_count
 
-                # 데이터 파싱
-                final_items = await page.query_selector_all(".prod_list_wrap ul.type > li")
-                for item in final_items:
-                    try:
-                        title_el = await item.query_selector(".item_title.eps3")
-                        title = await title_el.inner_text() if title_el else "제목 없음"
+                # 데이터 파싱 (수정본)
+final_items = await page.query_selector_all(".prod_list_wrap ul.type > li")
+for item in final_items:
+    try:
+        # 1. 'li' 바로 아래의 'inr.right' 영역만 특정합니다 (확장 영역 제외)
+        # Playwright의 CSS Selector에서 > 를 사용하여 직계 자식만 선택합니다.
+        main_info = await item.query_selector(":scope > .inr.right")
+        
+        # 만약 구조가 복잡하다면, 이미지 영역이 옆에 붙어 있는 경우만 추출하도록 필터링
+        img_check = await item.query_selector(":scope > .inr.img")
+        if not img_check or not main_info:
+            continue
 
-                        price_el = await item.query_selector(".price")
-                        price_raw = await price_el.inner_text() if price_el else "0"
-                        price = "".join(filter(str.isdigit, price_raw))
+        # 2. 추출 대상 요소를 main_info 범위 내로 한정합니다.
+        title_el = await main_info.query_selector(".item_title")
+        title = await title_el.inner_text() if title_el else "제목 없음"
 
-                        img_el = await item.query_selector(".inr.img img")
-                        img_url = await img_el.get_attribute("src") if img_el else ""
-                        if img_url and img_url.startswith("//"): img_url = "https:" + img_url
+        price_el = await main_info.query_selector(".price")
+        price_raw = await price_el.inner_text() if price_el else "0"
+        price = "".join(filter(str.isdigit, price_raw))
 
-                        all_products.append({
-                            "지역": region_name,
-                            "상품명": title.strip(),
-                            "가격": int(price) if price else 0,
-                            "이미지URL": img_url,
-                            "URL": current_url
-                        })
-                    except: continue
+        img_el = await img_check.query_selector("img")
+        img_url = await img_el.get_attribute("src") if img_el else ""
+        if img_url and img_url.startswith("//"): 
+            img_url = "https:" + img_url
 
-                print(f"✅ {region_name} 완료 ({len(final_items)}개)")
-                await asyncio.sleep(5)
-
-            except Exception as e:
-                print(f"❌ {current_url} 에러: {e}")
-                continue
+        all_products.append({
+            "지역": region_name,
+            "상품명": title.strip(),
+            "가격": int(price) if price else 0,
+            "이미지URL": img_url,
+            "URL": current_url
+        })
+    except Exception as e:
+        print(f"개별 상품 파싱 에러: {e}")
+        continue
 
        # --------------------------------------------------
         # 구글 스프레드시트 적재 (멀티 업데이트 버전)
