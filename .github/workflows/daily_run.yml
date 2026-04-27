@@ -2,7 +2,6 @@ name: Daily Hanatour Crawling
 
 on:
   schedule:
-    # UTC 23:00은 한국 시간(KST) 다음날 오전 8시입니다.
     - cron: '0 23 * * *'
   workflow_dispatch: 
 
@@ -10,26 +9,24 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
-    # 경고를 없애기 위해 Node.js 24 환경 강제 설정
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4.2.2
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.10'
+      - name: Set up Python
+        uses: actions/setup-python@v5.3.0
+        with:
+          python-version: '3.10'
 
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install pandas gspread google-auth playwright playwright-stealth
-        playwright install chromium
-        playwright install-deps
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas gspread google-auth playwright playwright-stealth
+          playwright install chromium
+          playwright install-deps
 
-    # secrets.json이 이미 리포지토리에 있으므로, 별도의 생성 단계 없이 바로 실행합니다.
-    - name: Run Crawler
-      run: python -u crawling.py
+      - name: Run Crawler
+        run: python -u crawling.py
