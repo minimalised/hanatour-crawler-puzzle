@@ -14,6 +14,7 @@ async def run_crawler():
         )
         page = await context.new_page()
 
+        # 수집할 URL 리스트를 여기에 추가하세요
         url_list = [
 "https://puzzle.hanatour.com/package/major-products?cntryCd=TH&cityCd=BKK&depCityCd=JCN&cityNm=%EB%B0%A9%EC%BD%95&pkgRppdDvCds=01",
 "https://puzzle.hanatour.com/package/major-products?cntryCd=TH&cityCd=PYX&depCityCd=JCN&cityNm=%ED%8C%8C%ED%83%80%EC%95%BC&pkgRppdDvCds=01",
@@ -178,7 +179,6 @@ async def run_crawler():
 "https://puzzle.hanatour.com/package/major-products?pkgServiceCd=DP&cityNm=%EC%B6%A9%EC%B2%AD%EB%82%A8%EB%8F%84&scods=B7&sort=RPRS_SORT5&prodBrndCds=22&cityCatgAreaDvCd=S",
 "https://puzzle.hanatour.com/package/major-products?pkgServiceCd=DP&cityNm=%EC%A0%9C%EC%A3%BC%EB%8F%84&scods=B9&sort=RPRS_SORT5&prodBrndCds=22&cityCatgAreaDvCd=S",
 "https://puzzle.hanatour.com/package/major-products?pkgServiceCd=DP&cityCd=AK3&cityNm=%EC%9A%B8%EB%A6%89%EA%B5%B0&scods&sort=RPRS_SORT5&cityCatgAreaDvCd=C"
-
         ]
 
         all_products = []
@@ -206,21 +206,29 @@ async def run_crawler():
                             if not main_info or not img_check:
                                 continue
 
+                            # 1. 상품명 추출 (해시태그 포함 전체)
                             title_el = await main_info.query_selector(".item_title")
                             title = (await title_el.inner_text()).strip() if title_el else "제목 없음"
 
+                            # 2. 가격 추출 (숫자만)
                             price_el = await main_info.query_selector(".price")
                             price_raw = await price_el.inner_text() if price_el else "0"
                             price = "".join(filter(str.isdigit, price_raw))
 
+                            # 3. 이미지 URL 추출
                             img_el = await img_check.query_selector("img")
                             img_url = await img_el.get_attribute("src") if img_el else ""
                             if img_url and img_url.startswith("//"): 
                                 img_url = "https:" + img_url
 
-                            img_filename = img_url.split('/')[-1].split('?')[0]
-                            unique_key = f"{title}_{img_filename}"
-                            product_id = hashlib.md5(unique_key.encode()).hexdigest()[:10]
+                            # 4. 고유 ID 생성 (네이버 어뷰징 방지용)
+                            # 가격이나 이미지 파일명을 섞지 않고 '상품명'만 기준으로 삼습니다.
+                            # URL 길이를 위해 8자리로 단축 생성합니다.
+                            product_id = hashlib.md5(title.encode()).hexdigest()[:8]
+
+                            # 5. URL 조합 (파라미터 pID 추가)
+                            # 네이버 쇼핑 상품 URL 제한(250자)을 고려한 설계
+                            final_url = f"{current_url}&pID={product_id}"
 
                             all_products.append({
                                 "ID": product_id,
@@ -228,7 +236,7 @@ async def run_crawler():
                                 "상품명": title,
                                 "가격": int(price) if price else 0,
                                 "이미지URL": img_url,
-                                "URL": current_url
+                                "URL": final_url
                             })
                         except Exception as e:
                             print(f"개별 상품 파싱 에러: {e}")
@@ -243,6 +251,7 @@ async def run_crawler():
                 print(f"❌ {current_url} 접속 에러: {e}")
                 continue
 
+        # 스프레드시트 적재
         if all_products:
             print("\n🚀 스프레드시트 업데이트 시작...")
             target_spreadsheet_ids = [
@@ -259,8 +268,11 @@ async def run_crawler():
                 gc = gspread.authorize(creds)
 
                 df = pd.DataFrame(all_products)
+                # 요청하신 순서: 지역, 상품명, 가격, 이미지URL, URL, ID
                 column_order = ["지역", "상품명", "가격", "이미지URL", "URL", "ID"]
                 df = df[column_order]
+                
+                # 물리적 삭제 없이 모든 행(지역별 중복 포함) 적재
                 data_to_upload = [df.columns.values.tolist()] + df.values.tolist()
 
                 for spreadsheet_id in target_spreadsheet_ids:
