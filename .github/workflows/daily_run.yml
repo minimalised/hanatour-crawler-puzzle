@@ -3,13 +3,16 @@ name: Daily Hanatour Crawling
 on:
   schedule:
     # UTC 23:00은 한국 시간(KST) 다음날 오전 8시입니다.
-    # 분 시 일 월 요일
     - cron: '0 23 * * *'
   workflow_dispatch: 
 
 jobs:
   build:
     runs-on: ubuntu-latest
+
+    # 경고를 없애기 위해 Node.js 24 환경 강제 설정
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
     - name: Checkout code
@@ -25,7 +28,12 @@ jobs:
         python -m pip install --upgrade pip
         pip install pandas gspread google-auth playwright playwright-stealth
         playwright install chromium
-        playwright install-deps  # <--- 이 줄을 추가해 보세요! 시스템 라이브러리를 설치합니다.
+        playwright install-deps
+
+    # 💡 팁: secrets.json 파일을 생성하는 단계가 빠져있다면 추가해야 합니다.
+    # 만약 기존에 잘 돌아갔다면 이 부분은 본인의 설정에 맞춰 유지하세요.
+    - name: Create secrets.json from GitHub Secrets
+      run: echo "${{ secrets.GCP_SERVICES_JSON }}" > secrets.json
 
     - name: Run Crawler
       run: python -u crawling.py
