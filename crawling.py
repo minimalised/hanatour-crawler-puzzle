@@ -1,5 +1,5 @@
 import asyncio
-import hashlib  # 고유 ID 생성을 위해 추가
+import hashlib
 import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
@@ -15,7 +15,7 @@ async def run_crawler():
         )
         page = await context.new_page()
 
-        # 수집할 URL 리스트 (생략 - 기존 리스트 유지)
+        # 수집할 URL 리스트
         url_list = [
 "https://puzzle.hanatour.com/package/major-products?cntryCd=TH&cityCd=BKK&depCityCd=JCN&cityNm=%EB%B0%A9%EC%BD%95&pkgRppdDvCds=01",
 "https://puzzle.hanatour.com/package/major-products?cntryCd=TH&cityCd=PYX&depCityCd=JCN&cityNm=%ED%8C%8C%ED%83%80%EC%95%BC&pkgRppdDvCds=01",
@@ -197,8 +197,9 @@ async def run_crawler():
                 except:
                     region_name = "지역명 미상"
 
-                # 목표 상품 개수 추출 (생략 - 기존 로직 유지)
-                # 스크롤 로딩 (생략 - 기존 로직 유지)
+                # 스크롤 로딩 (기존 로직이 있다면 여기에 포함됩니다)
+                await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                await asyncio.sleep(2)
 
                 # --- 데이터 파싱 영역 ---
                 try:
@@ -220,8 +221,7 @@ async def run_crawler():
                             price_raw = await price_el.inner_text() if price_el else "0"
                             price = "".join(filter(str.isdigit, price_raw))
 
-                            # 3. 고유 ID 생성 (핵심)
-                            # 가격을 제외하고 '상품명+지역'만 조합하여 해시 생성 -> 가격이 변해도 ID 유지
+                            # 3. 고유 ID 생성 (가격 제외, 상품명+지역 조합)
                             unique_key = f"{title}_{region_name}"
                             product_id = hashlib.md5(unique_key.encode()).hexdigest()[:10]
 
@@ -232,7 +232,7 @@ async def run_crawler():
                                 img_url = "https:" + img_url
 
                             all_products.append({
-                                "ID": product_id,  # 생성된 고유 ID
+                                "ID": product_id,
                                 "지역": region_name,
                                 "상품명": title,
                                 "가격": int(price) if price else 0,
@@ -246,15 +246,54 @@ async def run_crawler():
                     print(f"파싱 리스트 획득 에러: {e}")
 
                 print(f"✅ {region_name} 완료 ({len(all_products)}개 누적)")
-                await asyncio.sleep(2) # 간격 조정
+                await asyncio.sleep(2)
 
             except Exception as e:
                 print(f"❌ {current_url} 접속 에러: {e}")
                 continue
 
         # --------------------------------------------------
-        # 구글 스프레드시트 적재 (생략 - 기존 로직 유지)
+        # 구글 스프레드시트 적재 (요청하신 순서 반영)
         # --------------------------------------------------
+        if all_products:
+            print("\n🚀 스프레드시트 업데이트 시작...")
+            target_spreadsheet_ids = [
+                "1mH51VHs4y0FgClkUBvZgw7oY3Yv7gQBA_a3um9uhX0I",
+                "1JgWk9PYT6LG_1GnPdpVY0mZavcHXDWRSrzdE0lVmjj4",
+                "1Hoq0N88mestsHXbIOjwue3OctXf7dvKkx99eieYFhAY",
+                "1BK4xUHQFrLjLTn6vE0jSuwqMvSU7ZMKIV-nPvmySPx8"
+            ]
+            worksheet_name = "github"
+
+            try:
+                scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+                creds = Credentials.from_service_account_file('secrets.json', scopes=scopes)
+                gc = gspread.authorize(creds)
+
+                # 1. 데이터프레임 생성
+                df = pd.DataFrame(all_products)
+
+                # 2. 컬럼 순서 재배치 (요청하신 순서: 지역, 상품명, 가격, 이미지URL, URL, ID)
+                column_order = ["지역", "상품명", "가격", "이미지URL", "URL", "ID"]
+                df = df[column_order]
+
+                # 3. 적재 데이터 준비 (헤더 포함)
+                data_to_upload = [df.columns.values.tolist()] + df.values.tolist()
+
+                for spreadsheet_id in target_spreadsheet_ids:
+                    try:
+                        doc = gc.open_by_key(spreadsheet_id)
+                        sheet = doc.worksheet(worksheet_name)
+                        
+                        # 기존 시트 비우고 새로 적재
+                        sheet.clear()
+                        sheet.update(data_to_upload)
+                        print(f"✅ 성공: [{doc.title}] 지정된 순서로 업데이트 완료")
+                    except Exception as sheet_error:
+                        print(f"⚠️ {spreadsheet_id} 업데이트 실패: {sheet_error}")
+
+            except Exception as e:
+                print(f"❌ 구글 시트 처리 에러: {e}")
         
         await browser.close()
 
