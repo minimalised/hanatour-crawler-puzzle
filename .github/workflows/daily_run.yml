@@ -30,10 +30,6 @@ jobs:
         playwright install chromium
         playwright install-deps
 
-    # 💡 팁: secrets.json 파일을 생성하는 단계가 빠져있다면 추가해야 합니다.
-    # 만약 기존에 잘 돌아갔다면 이 부분은 본인의 설정에 맞춰 유지하세요.
-    - name: Create secrets.json from GitHub Secrets
-      run: echo "${{ secrets.GCP_SERVICES_JSON }}" > secrets.json
-
+    # secrets.json이 이미 리포지토리에 있으므로, 별도의 생성 단계 없이 바로 실행합니다.
     - name: Run Crawler
       run: python -u crawling.py
