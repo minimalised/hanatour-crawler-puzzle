@@ -76,7 +76,7 @@ async def run_crawler():
 "https://puzzle.hanatour.com/package/major-products?cntryCd=JP&cityCd=AKJ&depCityCd=JCN&cityNm=%EC%95%84%EC%82%AC%ED%9E%88%EC%B9%B4%EC%99%80&pkgRppdDvCds=01",
 "https://puzzle.hanatour.com/package/major-products?cntryCd=JP&cityCd=993&depCityCd=JCN&cityNm=%EB%85%B8%EB%B3%B4%EB%A6%B0%EB%B2%A0%EC%B8%A0&pkgRppdDvCds=01",
 "https://puzzle.hanatour.com/package/major-products?cntryCd=JP&cityCd=HKD&depCityCd=JCN&cityNm=%ED%95%98%EC%BD%94%EB%8B%A4%ED%85%8C&pkgRppdDvCds=01",
-"https://puzzle.hanatour.com/package/major-products?cntryCd=JP&cityCd=F59,TAK&depCityCd=JCN&cityNm=%EB%8B%A4%B9%EC%B9%B4%EB%A7%88%EC%B8%A0&pkgRppdDvCds=01",
+"https://puzzle.hanatour.com/package/major-products?cntryCd=JP&cityCd=F59,TAK&depCityCd=JCN&cityNm=%EB%8B%A4%EC%B9%B4%EB%A7%88%EC%B8%A0&pkgRppdDvCds=01",
 "https://puzzle.hanatour.com/package/major-products?cntryCd=JP&cityCd=MYJ&depCityCd=JCN&cityNm=%EB%A7%88%EC%B8%A0%EC%95%BC%EB%A7%88&pkgRppdDvCds=01",
 "https://puzzle.hanatour.com/package/major-products?cntryCd=JP&cityCd=TKS&depCityCd=JCN&cityNm=%EB%8F%84%EC%BF%A0%EC%8B%9C%EB%A7%88&pkgRppdDvCds=01",
 "https://puzzle.hanatour.com/package/major-products?cntryCd=JP&cityCd=TTJ&depCityCd=JCN&cityNm=%EB%8F%97%ED%86%A0%EB%A6%AC&pkgRppdDvCds=01",
