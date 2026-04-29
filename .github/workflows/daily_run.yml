@@ -30,3 +30,6 @@ jobs:
 
       - name: Run Crawler
         run: python -u crawling.py
+
+      - name: Run Cruise Crawler
+        run: python -u crawling_cruise.py
