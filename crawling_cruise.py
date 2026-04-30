@@ -23,8 +23,7 @@ async def run_cruise_crawler():
             "https://puzzle.hanatour.com/promotion/plan/PM006674499A",
             "https://puzzle.hanatour.com/promotion/plan/PM00667583D5",
             "https://puzzle.hanatour.com/promotion/plan/PM0066857B4C",
-            "https://puzzle.hanatour.com/promotion/plan/PM0066858D10",
-            "https://puzzle.hanatour.com/package/major-products?rprsProdCds=MHH1138,MHA1029,MHE1094,MHW1088,MHH1139,MEW1255,MEE1104"
+            "https://puzzle.hanatour.com/promotion/plan/PM0066858D10"
         ]
 
         all_products = []
