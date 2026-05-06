@@ -25,11 +25,7 @@ jobs:
           playwright install chromium
           playwright install-deps
 
-      - name: Run Crawler
-        run: python -u crawling.py
-        
-      - name: Run Cruise Crawler
-        run: python -u crawling_cruise.py
+
         
       - name: Run Promotion Crawler
         run: python -u crawling_promotion.py
