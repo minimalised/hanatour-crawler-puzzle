@@ -206,28 +206,40 @@ async def run_crawler():
                             if not main_info or not img_check:
                                 continue
 
-                            # 1. 상품명 추출 (해시태그 포함 전체)
+                            # 1. 상품명 추출
                             title_el = await main_info.query_selector(".item_title")
                             title = (await title_el.inner_text()).strip() if title_el else "제목 없음"
 
-                            # 2. 가격 추출 (숫자만)
+                            # 2. 가격 추출
                             price_el = await main_info.query_selector(".price")
                             price_raw = await price_el.inner_text() if price_el else "0"
                             price = "".join(filter(str.isdigit, price_raw))
 
-                            # 3. 이미지 URL 추출
+                            # 3. 평점 및 리뷰 수 추출 (추가된 부분)
+                            star_el = await main_info.query_selector(".icn.star")
+                            if star_el:
+                                # 전체 텍스트(예: "4.8(100)")를 가져온 후 전처리
+                                star_text = await star_el.inner_text()
+                                # 평점: 숫자와 소수점만 추출 (예: 4.8)
+                                rating = star_text.split('(')[0].strip()
+                                # 리뷰 수: 괄호 안의 숫자만 추출 (예: 100)
+                                review_count_el = await star_el.query_selector("em")
+                                review_count = await review_count_el.inner_text() if review_count_el else "0"
+                                review_count = "".join(filter(str.isdigit, review_count))
+                            else:
+                                rating = "0"
+                                review_count = "0"
+
+                            # 4. 이미지 URL 추출
                             img_el = await img_check.query_selector("img")
                             img_url = await img_el.get_attribute("src") if img_el else ""
                             if img_url and img_url.startswith("//"): 
                                 img_url = "https:" + img_url
 
-                            # 4. 고유 ID 생성 (네이버 어뷰징 방지용)
-                            # 가격이나 이미지 파일명을 섞지 않고 '상품명'만 기준으로 삼습니다.
-                            # URL 길이를 위해 8자리로 단축 생성합니다.
+                            # 5. 고유 ID 생성
                             product_id = hashlib.md5(title.encode()).hexdigest()[:8]
 
-                            # 5. URL 조합 (파라미터 pID 추가)
-                            # 네이버 쇼핑 상품 URL 제한(250자)을 고려한 설계
+                            # 6. URL 조합
                             final_url = f"{current_url}&pID={product_id}"
 
                             all_products.append({
@@ -235,6 +247,8 @@ async def run_crawler():
                                 "지역": region_name,
                                 "상품명": title,
                                 "가격": int(price) if price else 0,
+                                "평점": float(rating) if rating else 0.0,
+                                "리뷰수": int(review_count) if review_count else 0,
                                 "이미지URL": img_url,
                                 "URL": final_url
                             })
@@ -267,9 +281,9 @@ async def run_crawler():
                 creds = Credentials.from_service_account_file('secrets.json', scopes=scopes)
                 gc = gspread.authorize(creds)
 
+                # 스프레드시트 컬럼 순서 업데이트
                 df = pd.DataFrame(all_products)
-                # 요청하신 순서: 지역, 상품명, 가격, 이미지URL, URL, ID
-                column_order = ["지역", "상품명", "가격", "이미지URL", "URL", "ID"]
+                column_order = ["지역", "상품명", "가격", "평점", "리뷰수", "이미지URL", "URL", "ID"]
                 df = df[column_order]
                 
                 # 물리적 삭제 없이 모든 행(지역별 중복 포함) 적재
