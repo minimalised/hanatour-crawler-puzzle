@@ -140,7 +140,7 @@ async def run_cruise_crawler():
                     try:
                         doc = gc.open_by_key(sid)
                         try:
-                            sheet = doc.worksheet("github_cruise")
+                            sheet = doc.worksheet("github_promotion_cruise")
                         except gspread.exceptions.WorksheetNotFound:
                             sheet = doc.add_worksheet(title="github_cruise", rows="1000", cols="10")
                         
