@@ -16,7 +16,7 @@ async def run_crawler():
 
         # 수집할 URL 리스트를 여기에 추가하세요
         url_list = [
-"https://puzzle.hanatour.com/package/major-products?rprsProdCds=MJ11080"
+"https://puzzle.hanatour.com/package/major-products?rprsProdCds=MJ11080&cityNm=%EC%9D%B4%EC%8A%A4%ED%84%B4%ED%81%AC%EB%A3%A8%EC%A6%88"
         ]
 
         all_products = []
