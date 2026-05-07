@@ -27,6 +27,9 @@ jobs:
 
       - name: Run Crawling
         run: python -u crawling.py
+      
+      - name: Run Crawling Cruise
+        run: python -u crawling_cruise.py
 
       - name: Run Promotion Crawling
         run: python -u crawling_promotion.py
