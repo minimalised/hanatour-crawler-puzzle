@@ -16,7 +16,13 @@ async def run_crawler():
 
         # 수집할 URL 리스트를 여기에 추가하세요
         url_list = [
-"https://puzzle.hanatour.com/package/major-products?rprsProdCds=MJ11080&cityNm=%EC%9D%B4%EC%8A%A4%ED%84%B4%ED%81%AC%EB%A3%A8%EC%A6%88"
+"https://puzzle.hanatour.com/package/major-products?rprsProdCds=MJ11080&cityNm=%EC%9D%B4%EC%8A%A4%ED%84%B4%ED%81%AC%EB%A3%A8%EC%A6%88",
+"https://puzzle.hanatour.com/package/major-products?rprsProdCds=MCC1203&cityNm=%EB%B2%A8%EB%A6%AC%EC%8B%9C%EB%A7%88%ED%81%AC%EB%A3%A8%EC%A6%88",
+"https://puzzle.hanatour.com/package/major-products?rprsProdCds=MJH1034&cityNm=%EC%BD%94%EC%8A%A4%ED%83%80%EC%84%B8%EB%A0%88%EB%82%98%ED%98%B8",
+"https://puzzle.hanatour.com/package/major-products?rprsProdCds=MAS1088&cityNm=%EB%A1%9C%EC%96%84%EC%BA%90%EB%A6%AC%EB%B9%84%EC%95%88",
+"https://puzzle.hanatour.com/package/major-products?rprsProdCds=MEW1182&cityNm=%EB%A1%9C%EC%96%84%EC%BA%90%EB%A6%AC%EB%B9%84%EC%95%88",
+"https://puzzle.hanatour.com/package/major-products?rprsProdCds=MAT1204&cityNm=%EC%8A%A4%ED%83%80%EB%84%A4%EB%B9%84%EA%B2%8C%EC%9D%B4%ED%84%B0",
+"https://puzzle.hanatour.com/package/major-products?rprsProdCds=MHA1024&cityNm=%EB%A1%9C%EC%96%84%ED%94%84%EB%A6%B0%EC%84%B8%EC%8A%A4"
         ]
 
         all_products = []
