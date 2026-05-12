@@ -30,17 +30,7 @@ jobs:
           # [변경] 시스템 패키지(deps)는 이미 컨테이너에 있으므로 브라우저만 설치합니다.
           playwright install chromium
 
-      - name: Run Existing Crawling
-        run: python -u crawling.py
 
-      - name: Run Existing Crawling Cruise
-        run: python -u crawling_cruise.py
-
-      - name: Run Existing Promotion Crawling
-        run: python -u crawling_promotion.py
-
-      - name: Run Existing Cruise Promotion Crawling
-        run: python -u crawling_promotion_cruise.py
         
       - name: Run Hotel List Crawling
         run: python -u crawling_hotel.py
