@@ -1,7 +1,7 @@
 import gspread
 from google.oauth2.service_account import Credentials
 from playwright.sync_api import sync_playwright
-from playwright_stealth import stealth 
+from playwright_stealth.stealth import stealth_sync as stealth
 import hashlib
 import time
 
