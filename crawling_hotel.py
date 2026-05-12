@@ -50,22 +50,30 @@ async def run_hotel_crawling():
                 await page.wait_for_selector(".item_title", timeout=15000)
                 await asyncio.sleep(3)
 
-                # 데이터 추출
+                # --- 데이터 추출 및 숫자 변환 ---
                 hotel_name = (await page.locator(".item_title").first.inner_text()).strip()
+                
+                # 1. 가격 추출 및 숫자형(int) 변환 (C열)
                 price_text = await page.locator(".ly_wrap .price").first.inner_text()
-                price = "".join(filter(str.isdigit, price_text))
+                price_raw = "".join(filter(str.isdigit, price_text))
+                price = int(price_raw) if price_raw else 0
                 
                 img_el = page.locator(".htl_photo img").first
                 image_url = await img_el.get_attribute("src")
                 
-                rating = (await page.locator(".score_htl_wrap .star").first.inner_text()).strip()
-                review_raw = await page.locator(".score_htl_wrap em").first.inner_text()
-                review_count = "".join(filter(str.isdigit, review_raw))
+                # 2. 평점 추출 및 숫자형(float) 변환 (D열)
+                rating_raw = (await page.locator(".score_htl_wrap .star").first.inner_text()).strip()
+                rating = float(rating_raw) if rating_raw else 0.0
+                
+                # 3. 리뷰수 추출 및 숫자형(int) 변환 (E열)
+                review_text = await page.locator(".score_htl_wrap em").first.inner_text()
+                review_raw = "".join(filter(str.isdigit, review_text))
+                review_count = int(review_raw) if review_raw else 0
                 
                 product_id = hashlib.md5(hotel_name.encode()).hexdigest()[:8]
 
                 # --- 컬럼 순서 맞춤 (A~H) ---
-                # A:지역, B:상품명, C:가격, D:평점, E:리뷰수, F:이미지URL, G:URL, H:ID
+                # A:지역, B:상품명, C:가격(int), D:평점(float), E:리뷰수(int), F:이미지URL, G:URL, H:ID
                 extracted_data = [[region, hotel_name, price, rating, review_count, image_url, url, product_id]]
 
                 # --- 타겟 시트 적재 ---
@@ -78,8 +86,8 @@ async def run_hotel_crawling():
                             target_ws = doc.add_worksheet(title=WRITE_TAB_NAME, rows="1000", cols="20")
                             print(f"    💡 [{doc.title}]에 '{WRITE_TAB_NAME}' 탭 생성 완료")
                         
-                        # A열부터 H열까지 데이터 업데이트
-                        target_ws.update(f"A{i}:H{i}", extracted_data)
+                        # [핵심] value_input_option="USER_ENTERED"를 사용하여 숫자로 인식시킴
+                        target_ws.update(f"A{i}:H{i}", extracted_data, value_input_option="USER_ENTERED")
                     except Exception as e:
                         print(f"    ⚠️ 업데이트 에러 (ID: {t_id}): {e}")
 
