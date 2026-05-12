@@ -1,7 +1,7 @@
 import gspread
 from google.oauth2.service_account import Credentials
 from playwright.sync_api import sync_playwright
-# 모듈 전체를 가져온 뒤 내부 함수에 접근합니다.
+# 모듈 전체를 가져와서 내부 함수를 직접 호출하는 방식이 가장 안전합니다.
 import playwright_stealth
 import hashlib
 import time
@@ -9,6 +9,7 @@ import time
 def run_hotel_crawling():
     # 1. 구글 시트 인증 설정
     scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+    # secrets.json 파일이 레포지토리 최상단에 있어야 합니다.
     creds = Credentials.from_service_account_file("secrets.json", scopes=scopes)
     client = gspread.authorize(creds)
     
@@ -47,9 +48,14 @@ def run_hotel_crawling():
         context = browser.new_context(viewport={'width': 1920, 'height': 1080})
         page = context.new_page()
         
-        # [수정 포인트] AttributeError 해결을 위해 모듈 내 stealth 함수를 직접 호출합니다.
-        # 최신 버전 라이브러리 구조에 가장 안전한 호출 방식입니다.
-        playwright_stealth.stealth(page)
+        # [수정] 최신 버전의 playwright-stealth 호출 방식입니다.
+        # 모듈 내의 stealth 함수를 직접 호출하여 봇 탐지를 우회합니다.
+        try:
+            playwright_stealth.stealth(page)
+        except AttributeError:
+            # 혹시나 구버전이 설치되어 있을 경우를 대비한 예외 처리
+            from playwright_stealth import stealth_sync
+            stealth_sync(page)
 
         for i, row in enumerate(data_rows, start=2):
             if not row or len(row) < 1: continue
@@ -63,7 +69,7 @@ def run_hotel_crawling():
             print(f">>> [{region}] 크롤링 중: {url}")
             
             try:
-                page.goto(url, wait_until="domcontentloaded")
+                page.goto(url, wait_until="domcontentloaded", timeout=30000)
                 # 페이지 내 주요 요소가 나타날 때까지 대기
                 page.wait_for_selector(".item_title", timeout=15000)
                 time.sleep(3) # 추가 렌더링 대기 시간
