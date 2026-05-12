@@ -1,14 +1,13 @@
 import gspread
 from google.oauth2.service_account import Credentials
 from playwright.sync_api import sync_playwright
-# 최신 버전의 라이브러리에서 발생하던 임포트 에러를 해결하기 위한 방식입니다.
+# 모듈 전체를 가져온 뒤 내부 함수에 접근합니다.
 import playwright_stealth
 import hashlib
 import time
 
 def run_hotel_crawling():
     # 1. 구글 시트 인증 설정
-    # 서비스 계정 키 파일 이름이 'secrets.json'인지 확인해 주세요.
     scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
     creds = Credentials.from_service_account_file("secrets.json", scopes=scopes)
     client = gspread.authorize(creds)
@@ -48,8 +47,9 @@ def run_hotel_crawling():
         context = browser.new_context(viewport={'width': 1920, 'height': 1080})
         page = context.new_page()
         
-        # 봇 탐지 우회 설정 (함수 호출 방식 수정됨)
-        playwright_stealth.stealth_sync(page)
+        # [수정 포인트] AttributeError 해결을 위해 모듈 내 stealth 함수를 직접 호출합니다.
+        # 최신 버전 라이브러리 구조에 가장 안전한 호출 방식입니다.
+        playwright_stealth.stealth(page)
 
         for i, row in enumerate(data_rows, start=2):
             if not row or len(row) < 1: continue
