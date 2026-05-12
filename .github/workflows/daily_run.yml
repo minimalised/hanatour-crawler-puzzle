@@ -2,8 +2,8 @@ name: Daily Hanatour Crawling
 
 on:
   schedule:
-    - cron: '0 23 * * *'
-  workflow_dispatch: 
+    - cron: '0 23 * * *' # 매일 밤 11시 실행
+  workflow_dispatch: # 수동 실행 가능
 
 jobs:
   build:
@@ -21,18 +21,22 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
+          # gspread, google-auth, playwright-stealth 필수 포함
           pip install pandas gspread google-auth playwright playwright-stealth
           playwright install chromium
           playwright install-deps
 
-      - name: Run Crawling
+      - name: Run Existing Crawling
         run: python -u crawling.py
-      
-      - name: Run Crawling Cruise
+
+      - name: Run Existing Crawling Cruise
         run: python -u crawling_cruise.py
 
-      - name: Run Promotion Crawling
+      - name: Run Existing Promotion Crawling
         run: python -u crawling_promotion.py
 
-      - name: Run Cruise Promotion Crawling
+      - name: Run Existing Cruise Promotion Crawling
         run: python -u crawling_promotion_cruise.py
+
+      - name: Run Hotel List Crawling
+        run: python -u crawling_hotel.py
