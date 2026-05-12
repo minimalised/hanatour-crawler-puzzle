@@ -50,6 +50,7 @@ async def run_hotel_crawling():
                 await page.wait_for_selector(".item_title", timeout=15000)
                 await asyncio.sleep(3)
 
+                # 데이터 추출
                 hotel_name = (await page.locator(".item_title").first.inner_text()).strip()
                 price_text = await page.locator(".ly_wrap .price").first.inner_text()
                 price = "".join(filter(str.isdigit, price_text))
@@ -57,32 +58,35 @@ async def run_hotel_crawling():
                 img_el = page.locator(".htl_photo img").first
                 image_url = await img_el.get_attribute("src")
                 
-                rating = await page.locator(".score_htl_wrap .star").first.inner_text()
+                rating = (await page.locator(".score_htl_wrap .star").first.inner_text()).strip()
                 review_raw = await page.locator(".score_htl_wrap em").first.inner_text()
                 review_count = "".join(filter(str.isdigit, review_raw))
                 
                 product_id = hashlib.md5(hotel_name.encode()).hexdigest()[:8]
-                extracted_data = [[hotel_name, price, image_url, url, rating.strip(), review_count, product_id]]
 
-                # --- 타겟 시트 적재 부분 (에러 방지 로직 강화) ---
+                # --- 컬럼 순서 맞춤 (A~H) ---
+                # A:지역, B:상품명, C:가격, D:평점, E:리뷰수, F:이미지URL, G:URL, H:ID
+                extracted_data = [[region, hotel_name, price, rating, review_count, image_url, url, product_id]]
+
+                # --- 타겟 시트 적재 ---
                 for t_id in TARGET_SHEET_IDS:
                     try:
                         doc = gc.open_by_key(t_id)
-                        # 탭이 있는지 확인하고 없으면 새로 만듭니다.
                         try:
                             target_ws = doc.worksheet(WRITE_TAB_NAME)
                         except gspread.exceptions.WorksheetNotFound:
                             target_ws = doc.add_worksheet(title=WRITE_TAB_NAME, rows="1000", cols="20")
-                            print(f"   💡 [{doc.title}]에 '{WRITE_TAB_NAME}' 탭이 없어 새로 생성했습니다.")
+                            print(f"    💡 [{doc.title}]에 '{WRITE_TAB_NAME}' 탭 생성 완료")
                         
-                        target_ws.update(f"C{i}:I{i}", extracted_data)
+                        # A열부터 H열까지 데이터 업데이트
+                        target_ws.update(f"A{i}:H{i}", extracted_data)
                     except Exception as e:
-                        print(f"   ⚠️ 업데이트 에러 (ID: {t_id}): {e}")
+                        print(f"    ⚠️ 업데이트 에러 (ID: {t_id}): {e}")
 
-                print(f"   ✅ 완료: {hotel_name}")
+                print(f"    ✅ 완료: {hotel_name}")
 
             except Exception as e:
-                print(f"   ❌ 실패 [{url}]: {e}")
+                print(f"    ❌ 실패 [{url}]: {e}")
                 continue
 
         await browser.close()
