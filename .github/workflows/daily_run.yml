@@ -2,12 +2,16 @@ name: Daily Hanatour Crawling
 
 on:
   schedule:
-    - cron: '0 23 * * *' # 매일 밤 11시 실행
-  workflow_dispatch: # 수동 실행 가능
+    - cron: '0 23 * * *' # 매일 밤 11시 실행 (KST 오전 8시)
+  workflow_dispatch: # 수동 버튼 실행 가능
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    # [핵심] Playwright 전용 환경을 통째로 빌려옵니다. 
+    # 설치 과정(install-deps)을 생략할 수 있는 치트키입니다.
+    container:
+      image: mcr.microsoft.com/playwright:v1.46.0-noble
 
     steps:
       - name: Checkout code
@@ -21,11 +25,10 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          # gspread, google-auth, playwright-stealth 필수 포함
+          # 파이썬 라이브러리만 설치합니다.
           pip install pandas gspread google-auth playwright playwright-stealth
+          # [변경] 시스템 패키지(deps)는 이미 컨테이너에 있으므로 브라우저만 설치합니다.
           playwright install chromium
-          playwright install-deps
-
 
       - name: Run Hotel List Crawling
         run: python -u crawling_hotel.py
