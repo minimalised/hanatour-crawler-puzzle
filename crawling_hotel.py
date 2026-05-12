@@ -5,66 +5,85 @@ from playwright_stealth import stealth_sync
 import time
 
 def run_hotel_crawling():
-    # 1. 구글 시트 연결 (키 파일명은 환경에 맞게 수정)
+    # 1. 구글 시트 인증 설정
     scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
     creds = Credentials.from_service_account_file("secrets.json", scopes=scopes)
     client = gspread.authorize(creds)
     
-    spreadsheet = client.open("호텔상품리스트")
-    worksheet = spreadsheet.get_worksheet(0)
+    # ---------------------------------------------------------
+    # 2. 시트 설정
+    # URL 리스트를 가져올 마스터 스프레드시트 ID (호텔상품리스트)
+    MASTER_SHEET_ID = "1mH51VHs4y0FgClkUBvZgw7oY3Yv7gQBA_a3um9uhX0I"
     
-    # 헤더 제외한 전체 행 가져오기
-    all_rows = worksheet.get_all_values()
-    data_rows = all_rows[1:] # 2행부터
+    # 데이터를 적재할 공통 탭 이름
+    TARGET_TAB_NAME = "github_hotel"
+    
+    # 결과를 동일하게 적재할 타겟 스프레드시트 ID 리스트
+    TARGET_SHEET_IDS = [
+                "1mH51VHs4y0FgClkUBvZgw7oY3Yv7gQBA_a3um9uhX0I",
+                "1JgWk9PYT6LG_1GnPdpVY0mZavcHXDWRSrzdE0lVmjj4",
+                "1Hoq0N88mestsHXbIOjwue3OctXf7dvKkx99eieYFhAY",
+                "1BK4xUHQFrLjLTn6vE0jSuwqMvSU7ZMKIV-nPvmySPx8"
+    ]
+    # ---------------------------------------------------------
+
+    # 마스터 시트에서 URL 리스트 읽기
+    try:
+        master_spreadsheet = client.open_by_key(MASTER_SHEET_ID)
+        master_worksheet = master_spreadsheet.worksheet(TARGET_TAB_NAME)
+        all_rows = master_worksheet.get_all_values()
+        data_rows = all_rows[1:] # 헤더 제외 2행부터
+    except Exception as e:
+        print(f"마스터 시트 로드 실패: {e}")
+        return
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True) # Actions 환경이므로 True
+        browser = p.chromium.launch(headless=True)
         context = browser.new_context(viewport={'width': 1920, 'height': 1080})
         page = context.new_page()
-        stealth_sync(page) # 봇 탐지 방지 적용
+        stealth_sync(page)
 
         for i, row in enumerate(data_rows, start=2):
+            if not row or len(row) < 1: continue
+            
             url = row[0].strip()   # A열: URL
-            region = row[1].strip() # B열: 지역명
+            region = row[1].strip() if len(row) > 1 else "지역미정" # B열: 지역명
             
             if not url or "http" not in url:
                 continue
 
-            print(f">>> [{region}] 크롤링 시도: {url}")
+            print(f">>> [{region}] 크롤링 중: {url}")
             
             try:
                 page.goto(url, wait_until="domcontentloaded")
-                # 메인 데이터 요소가 나타날 때까지 대기
                 page.wait_for_selector(".item_title", timeout=15000)
-                time.sleep(3) # 동적 렌더링 완료 대기
+                time.sleep(3)
 
-                # --- 데이터 추출 (제공된 HTML 매칭) ---
-                # 1. 호텔명 (상단 메인)
+                # --- 데이터 추출 (제공된 HTML 구조 반영) ---
                 hotel_name = page.locator(".item_title").first.inner_text().strip()
-                
-                # 2. 가격 (상단 1박 요금 최저가)
-                # .price_group 안의 .price가 여러개일 수 있으나 요약 영역의 것을 가져옴
                 price_text = page.locator(".ly_wrap .price").first.inner_text()
                 price = price_text.replace("원~", "").replace(",", "").strip()
-
-                # 3. 이미지 URL (상단 메인 이미지 첫 번째)
                 image_url = page.locator(".htl_photo img").first.get_attribute("src")
-
-                # 4. 평점 (별점 옆 숫자 4.4 등)
                 rating = page.locator(".score_htl_wrap .star").first.inner_text().strip()
-
-                # 5. 후기 개수 (숫자만 추출)
                 review_raw = page.locator(".score_htl_wrap em").first.inner_text()
                 review_count = "".join(filter(str.isdigit, review_raw))
 
-                print(f"성공: {hotel_name} | {price}원 | {rating}점")
+                # 추출 데이터 세트
+                extracted_data = [[hotel_name, price, image_url, url, rating, review_count]]
+                print(f"   => 추출 성공: {hotel_name}")
 
-                # --- 시트 업데이트 (C열~H열) ---
-                # 상품명(C), 가격(D), 이미지(E), 현재링크(F), 평점(G), 후기(H)
-                worksheet.update(f"C{i}:H{i}", [[hotel_name, price, image_url, url, rating, review_count]])
+                # --- 여러 개의 타겟 시트의 github_hotel 탭에 동일 내용 적재 ---
+                for t_id in TARGET_SHEET_IDS:
+                    if not t_id or "입력" in t_id: continue
+                    try:
+                        # 지정된 ID의 시트 내 'github_hotel' 탭을 찾아 업데이트
+                        target_worksheet = client.open_by_key(t_id).worksheet(TARGET_TAB_NAME)
+                        target_worksheet.update(f"C{i}:H{i}", extracted_data)
+                    except Exception as sheet_err:
+                        print(f"      ! 시트 업데이트 실패(ID: {t_id}): {sheet_err}")
 
             except Exception as e:
-                print(f"실패 [{url}]: {e}")
+                print(f"   ! 크롤링 실패 [{url}]: {e}")
                 continue
 
         browser.close()
