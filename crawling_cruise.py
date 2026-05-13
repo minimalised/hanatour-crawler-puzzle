@@ -6,6 +6,27 @@ from google.oauth2.service_account import Credentials
 from playwright.async_api import async_playwright
 
 async def run_crawler():
+    # 1. 구글 스프레드시트에서 URL 리스트 가져오기
+    print("🌐 [크루즈상품리스트] 시트에서 URL을 불러오는 중...")
+    scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+    creds = Credentials.from_service_account_file('secrets.json', scopes=scopes)
+    gc = gspread.authorize(creds)
+    
+    source_spreadsheet_id = "1mH51VHs4y0FgClkUBvZgw7oY3Yv7gQBA_a3um9uhX0I"
+    try:
+        source_doc = gc.open_by_key(source_spreadsheet_id)
+        source_sheet = source_doc.worksheet("크루즈상품리스트")
+        # A열 데이터 가져오기
+        raw_urls = source_sheet.col_values(1)
+        
+        # 유효한 URL만 필터링 (http로 시작하는 데이터만)
+        url_list = [url for url in raw_urls if url.strip().startswith("http")]
+        print(f"✅ 총 {len(url_list)}개의 크루즈 URL을 확보했습니다.")
+    except Exception as e:
+        print(f"❌ URL 리스트 로드 중 에러 발생: {e}")
+        return
+
+    # 2. Playwright 크롤링 시작
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         context = await browser.new_context(
@@ -13,17 +34,6 @@ async def run_crawler():
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
         )
         page = await context.new_page()
-
-        # 수집할 URL 리스트를 여기에 추가하세요
-        url_list = [
-"https://puzzle.hanatour.com/package/major-products?rprsProdCds=MJ11080&cityNm=%EC%9D%B4%EC%8A%A4%ED%84%B4%ED%81%AC%EB%A3%A8%EC%A6%88",
-"https://puzzle.hanatour.com/package/major-products?rprsProdCds=MCC1203&cityNm=%EB%B2%A8%EB%A6%AC%EC%8B%9C%EB%A7%88%ED%81%AC%EB%A3%A8%EC%A6%88",
-"https://puzzle.hanatour.com/package/major-products?rprsProdCds=MJH1034&cityNm=%EC%BD%94%EC%8A%A4%ED%83%80%EC%84%B8%EB%A0%88%EB%82%98%ED%98%B8",
-"https://puzzle.hanatour.com/package/major-products?rprsProdCds=MAS1088&cityNm=%EB%A1%9C%EC%96%84%EC%BA%90%EB%A6%AC%EB%B9%84%EC%95%88",
-"https://puzzle.hanatour.com/package/major-products?rprsProdCds=MEW1182&cityNm=%EB%A1%9C%EC%96%84%EC%BA%90%EB%A6%AC%EB%B9%84%EC%95%88",
-"https://puzzle.hanatour.com/package/major-products?rprsProdCds=MAT1204&cityNm=%EC%8A%A4%ED%83%80%EB%84%A4%EB%B9%84%EA%B2%8C%EC%9D%B4%ED%84%B0",
-"https://puzzle.hanatour.com/package/major-products?rprsProdCds=MHA1024&cityNm=%EB%A1%9C%EC%96%84%ED%94%84%EB%A6%B0%EC%84%B8%EC%8A%A4"
-        ]
 
         all_products = []
 
@@ -59,14 +69,11 @@ async def run_crawler():
                             price_raw = await price_el.inner_text() if price_el else "0"
                             price = "".join(filter(str.isdigit, price_raw))
 
-                            # 3. 평점 및 리뷰 수 추출 (추가된 부분)
+                            # 3. 평점 및 리뷰 수 추출
                             star_el = await main_info.query_selector(".icn.star")
                             if star_el:
-                                # 전체 텍스트(예: "4.8(100)")를 가져온 후 전처리
                                 star_text = await star_el.inner_text()
-                                # 평점: 숫자와 소수점만 추출 (예: 4.8)
                                 rating = star_text.split('(')[0].strip()
-                                # 리뷰 수: 괄호 안의 숫자만 추출 (예: 100)
                                 review_count_el = await star_el.query_selector("em")
                                 review_count = await review_count_el.inner_text() if review_count_el else "0"
                                 review_count = "".join(filter(str.isdigit, review_count))
@@ -109,28 +116,21 @@ async def run_crawler():
                 print(f"❌ {current_url} 접속 에러: {e}")
                 continue
 
-        # 스프레드시트 적재
+        # 3. 결과 적재 (github_cruise 시트로 전송)
         if all_products:
-            print("\n🚀 스프레드시트 업데이트 시작...")
+            print("\n🚀 결과 스프레드시트 업데이트 시작...")
             target_spreadsheet_ids = [
                 "1mH51VHs4y0FgClkUBvZgw7oY3Yv7gQBA_a3um9uhX0I",
                 "1JgWk9PYT6LG_1GnPdpVY0mZavcHXDWRSrzdE0lVmjj4",
                 "1Hoq0N88mestsHXbIOjwue3OctXf7dvKkx99eieYFhAY",
                 "1BK4xUHQFrLjLTn6vE0jSuwqMvSU7ZMKIV-nPvmySPx8"
             ]
-            worksheet_name = "github_cruise"
+            worksheet_name = "github_cruise"  # 크루즈용 시트 이름
 
             try:
-                scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-                creds = Credentials.from_service_account_file('secrets.json', scopes=scopes)
-                gc = gspread.authorize(creds)
-
-                # 스프레드시트 컬럼 순서 업데이트
                 df = pd.DataFrame(all_products)
                 column_order = ["지역", "상품명", "가격", "평점", "리뷰수", "이미지URL", "URL", "ID"]
                 df = df[column_order]
-                
-                # 물리적 삭제 없이 모든 행(지역별 중복 포함) 적재
                 data_to_upload = [df.columns.values.tolist()] + df.values.tolist()
 
                 for spreadsheet_id in target_spreadsheet_ids:
@@ -139,12 +139,12 @@ async def run_crawler():
                         sheet = doc.worksheet(worksheet_name)
                         sheet.clear()
                         sheet.update(data_to_upload)
-                        print(f"✅ 성공: [{doc.title}] 업데이트 완료")
+                        print(f"✅ 성공: [{doc.title}] ({worksheet_name}) 업데이트 완료")
                     except Exception as sheet_error:
                         print(f"⚠️ {spreadsheet_id} 업데이트 실패: {sheet_error}")
 
             except Exception as e:
-                print(f"❌ 구글 시트 처리 에러: {e}")
+                print(f"❌ 구글 시트 결과 적재 에러: {e}")
         
         await browser.close()
 
