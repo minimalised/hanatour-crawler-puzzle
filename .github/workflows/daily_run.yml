@@ -34,6 +34,9 @@ jobs:
       - name: Run Existing Crawling
         run: python -u crawling.py
 
+      - name: Run Existing Crawling local
+        run: python -u crawling_local.py
+
       - name: Run Existing Crawling Cruise
         run: python -u crawling_cruise.py
 
@@ -41,6 +44,7 @@ jobs:
         run: python -u crawling_promotion.py
 
       - name: Run Existing Cruise Promotion Crawling
-        run: python -u crawling_promotion_cruise.py  
+        run: python -u crawling_promotion_cruise.py
+        
       - name: Run Hotel List Crawling
         run: python -u crawling_hotel.py
