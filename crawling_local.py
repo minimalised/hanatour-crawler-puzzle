@@ -97,7 +97,7 @@ async def run_crawler():
                             product_id = hashlib.md5(title.encode()).hexdigest()[:8]
 
                             # 6. URL 조합
-                            final_url = f"{current_url}&pID={product_id}"
+                            final_url = f"{current_url}"
 
                             all_products.append({
                                 "ID": product_id,
