@@ -34,6 +34,9 @@ jobs:
 
       - name: Run Existing Crawling
         run: python -u crawling.py
+      
+      - name: Run Existing Crawling
+        run: python -u crawling_detail.py
 
       - name: Run Existing Crawling local
         run: python -u crawling_local.py
