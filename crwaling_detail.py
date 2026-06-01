@@ -182,7 +182,7 @@ async def run_crawler():
                 "1Hoq0N88mestsHXbIOjwue3OctXf7dvKkx99eieYFhAY",
                 "1BK4xUHQFrLjLTn6vE0jSuwqMvSU7ZMKIV-nPvmySPx8"
             ]
-            worksheet_name = "github"
+            worksheet_name = "github_detail"
 
             try:
                 df = pd.DataFrame(all_products)
