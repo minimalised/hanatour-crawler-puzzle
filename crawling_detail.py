@@ -8,12 +8,12 @@ from google.oauth2.service_account import Credentials
 from playwright.async_api import async_playwright
 
 # ==========================================
-# [개정] 해시태그 파싱 기반 중복 제로 네이버 최적화 함수
+# [최종완성] 중복 단어 제거 및 단어 단위 세이프 커팅 적용 함수
 # ==========================================
 def generate_naver_title(title, region_name):
     """
     하나투어의 해시태그(#)와 특전 정보를 완벽히 분석하여 
-    중복을 원천 차단하고 개별 상품의 강점을 노출하는 랭킹 최적화 함수
+    중복 키워드를 제거하고, 지정된 글자 수 한도 내에서 단어 깨짐 없이 깔끔하게 마감하는 함수
     """
     # 1. 원본 대괄호 등급 태그 추출 및 보존 (예: [신상품][세이브], [2030전용])
     grade_tags = re.findall(r'\[.*?\]', title)
@@ -31,7 +31,7 @@ def generate_naver_title(title, region_name):
     
     hash_str = " ".join(hashtags)
     
-    # 3. 획일화된 시즌 월 태그 대신 유연한 마케팅 접두어 풀(Pool) 구성
+    # 3. 마케팅 접두어 풀(Pool) 구성
     marketing_tag = "[실시간예약]"
     if "신상품" in grade_prefix:
         marketing_tag = "[신상공개]"
@@ -59,13 +59,13 @@ def generate_naver_title(title, region_name):
         selling_points.append("노쇼핑")
     if any(x in hash_str for x in ["노옵션", "NO옵션", "옵션없음"]):
         selling_points.append("노옵션")
-    if any(x in hash_str for x in ["5성", "초특급"]):
+    if any(x in hash_str for x in ["5성", "초특급"]) and "5성호텔" not in hash_str:
         selling_points.append("5성급호텔")
     if any(x in hash_str for x in ["마사지", "지압", "스파"]):
         selling_points.append("1일1마사지")
     if any(x in hash_str for x in ["자유", "세미", "에어텔"]):
         selling_points.append("자유일정포함")
-    if any(x in hash_str for x in ["크루즈", "요트"]):
+    if any(x in hash_str for x in ["크루즈", "요트"]) and "디너크루즈" not in hash_str:
         selling_points.append("요트크루즈")
         
     # 만약 매칭된 상위 혜택이 부족하면 실제 해시태그 중 유니크한 6자 이하 명사 추출
@@ -96,13 +96,23 @@ def generate_naver_title(title, region_name):
         elif "카오락" in title_body: clean_region = "카오락"
         else: clean_region = "방콕 패키지"
 
-    # 8. 최종 카탈로그 회피 및 검색최적화 구조 조립
-    # 구조: [마케팅] [하나투어등급] [핵심특전] TPO + 지역명 + 유니크코스 + 원본타이틀바디(박수포함)
-    naver_title = f"{marketing_tag} {grade_prefix} {selling_prefix} {tpo_keyword} {clean_region} {unique_spot}{title_body}"
+    # 8. 구조 1차 조립
+    raw_naver_title = f"{marketing_tag} {grade_prefix} {selling_prefix} {tpo_keyword} {clean_region} {unique_spot}{title_body}"
     
-    # 연속 공백 제거 및 네이버 쇼핑 노출 안정권인 65글자 제한
-    clean_title = " ".join(naver_title.split())
-    return clean_title[:65].strip()
+    # 🌟 [보완 포인트 1] 순서를 유지하면서 중복 텍스트/단어 완벽 제거
+    words = raw_naver_title.split()
+    unique_words = list(dict.fromkeys(words))
+    clean_title = " ".join(unique_words)
+    
+    # 🌟 [보완 포인트 2] 단어 단위로 세이프 커팅 (최대 75자 제한)
+    max_length = 75
+    if len(clean_title) > max_length:
+        truncated = clean_title[:max_length]
+        last_space = truncated.rfind(" ")
+        if last_space != -1:
+            clean_title = truncated[:last_space].strip()
+            
+    return clean_title.strip()
 
 
 async def run_crawler():
