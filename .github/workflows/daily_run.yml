@@ -31,24 +31,6 @@ jobs:
           
           # 3. [수정] 플레이라이트 브라우저 설치도 파이썬 모듈 방식으로 안전하게 호출합니다.
           python -m playwright install chromium
-
-      - name: Run Existing Crawling
-        run: python -u crawling.py
       
       - name: Run Existing Crawling
         run: python -u crawling_detail.py
-
-      - name: Run Existing Crawling local
-        run: python -u crawling_local.py
-
-      - name: Run Existing Crawling Cruise
-        run: python -u crawling_cruise.py
-
-      - name: Run Existing Promotion Crawling
-        run: python -u crawling_promotion.py
-
-      - name: Run Existing Cruise Promotion Crawling
-        run: python -u crawling_promotion_cruise.py
-        
-      - name: Run Hotel List Crawling
-        run: python -u crawling_hotel.py
