@@ -8,103 +8,106 @@ from google.oauth2.service_account import Credentials
 from playwright.async_api import async_playwright
 
 # ==========================================
-# [최종완성] 중복 단어 제거 및 단어 단위 세이프 커팅 적용 함수
+# [최종완성] 상위 80개 패턴 분석 기반 SEO 최적화 함수
 # ==========================================
 def generate_naver_title(title, region_name):
     """
-    하나투어의 해시태그(#)와 특전 정보를 완벽히 분석하여 
-    중복 키워드를 제거하고, 지정된 글자 수 한도 내에서 단어 깨짐 없이 깔끔하게 마감하는 함수
+    네이버 쇼핑 상위 노출 80개 상품의 공통 패턴인 
+    [출발지 선점 + 명사형 나열 + 타겟 다각화 + 중복 키워드 제거 + 단어 단위 세이프 커팅]을 적용한 최상위 SEO 함수
     """
-    # 1. 원본 대괄호 등급 태그 추출 및 보존 (예: [신상품][세이브], [2030전용])
+    # 1. 원본 대괄호 등급 태그 추출 및 보존
     grade_tags = re.findall(r'\[.*?\]', title)
-    grade_prefix = "".join(grade_tags) if grade_tags else "[인기추천]"
+    grade_prefix = "".join(grade_tags) if grade_tags else ""
     
-    # 2. 본문 타이틀과 해시태그 분리
+    # 2. 본문 타이틀과 해시태그 분리 및 결합 텍스트 준비
     parts = title.split('#')
     title_body = parts[0].strip()
     hashtags = [h.strip() for h in parts[1:] if h.strip()]
     
-    # 등급 태그가 타이틀 본문에 중복으로 남아있다면 정돈
     for gt in grade_tags:
         title_body = title_body.replace(gt, "")
     title_body = title_body.strip()
     
     hash_str = " ".join(hashtags)
-    
-    # 3. 마케팅 접두어 풀(Pool) 구성
-    marketing_tag = "[실시간예약]"
-    if "신상품" in grade_prefix:
-        marketing_tag = "[신상공개]"
-    elif "세이브" in grade_prefix or "특가" in hash_str or "가격" in hash_str:
-        marketing_tag = "[단독특가]"
-    elif "스마트" in grade_prefix or "가성비" in hash_str:
-        marketing_tag = "[실속추천]"
-    elif "프리미엄" in grade_prefix or "초특급" in hash_str:
-        marketing_tag = "[품격인증]"
+    combined_text = f"{title_body} {hash_str}"
 
-    # 4. 해시태그 기반의 정교한 타겟(TPO) 필터링
-    tpo_keyword = "해외여행"
-    if any(x in hash_str for x in ["효도", "부모님", "조부모"]):
-        tpo_keyword = "부모님 효도관광"
-    elif any(x in grade_prefix or x in hash_str for x in ["2030", "필름감성", "도파민", "SNS"]):
-        tpo_keyword = "2030 청춘여행"
-    elif any(x in hash_str for x in ["가족", "아동", "소아", "손주", "워터파크"]):
-        tpo_keyword = "가족여행 추천"
-    elif any(x in hash_str for x in ["휴양", "호캉스", "올인크루시브", "힐링"]):
-        tpo_keyword = "힐링 휴양여행"
+    # 3. [상위 80개 데이터 반영] 출발지 키워드 자동 스크리닝
+    departure = ""
+    departures = ["부산출발", "대구출발", "청주출발", "무안출발", "인천출발"]
+    for dep in departures:
+        if dep in combined_text:
+            departure = f"{dep} "
+            break
 
-    # 5. 핵심 혜택 및 유니크 키워드 스크리닝 (상위 노출 길목 확보)
+    # 4. [상위 80개 데이터 반영] 시즌성 연휴 및 방학 키워드 자동 매핑
+    season_tag = ""
+    now = datetime.datetime.now()
+    if now.month in [5, 6, 7, 8]:
+        season_tag = "여름휴가 추석연휴 여름방학 "
+    elif now.month in [9, 10, 11]:
+        season_tag = "단풍여행 겨울휴가 추석연휴 "
+    else:
+        season_tag = "해외여행추천 연휴여행 "
+
+    # 5. [상위 80개 데이터 반영] 조사를 완전히 뺀 명사형 롱테일 타겟 확장
+    target_tag = "해외여행 패키지투어"
+    if any(x in combined_text for x in ["효도", "부모님", "조부모", "환갑", "칠순"]):
+        target_tag = "부모님 효도여행 환갑여행 칠순여행 추천"
+    elif any(x in combined_text or x in grade_prefix for x in ["2030", "필름", "청춘", "혼자"]):
+        target_tag = "2030청춘여행 대학생세미패키지 혼자여행"
+    elif any(x in combined_text for x in ["가족", "아동", "소아", "손주", "엄마랑"]):
+        target_tag = "가족해외여행 엄마랑여행 패키지 추천"
+    elif any(x in combined_text for x in ["자유", "세미", "에어텔", "호캉스"]):
+        target_tag = "세미패키지 자유일정포함 호캉스"
+
+    # 6. 해시태그 기반 핵심 쇼핑 키워드 2개 추출
     selling_points = []
-    if any(x in hash_str for x in ["노쇼핑", "NO쇼핑", "쇼핑없음"]):
-        selling_points.append("노쇼핑")
-    if any(x in hash_str for x in ["노옵션", "NO옵션", "옵션없음"]):
-        selling_points.append("노옵션")
-    if any(x in hash_str for x in ["5성", "초특급"]) and "5성호텔" not in hash_str:
-        selling_points.append("5성급호텔")
-    if any(x in hash_str for x in ["마사지", "지압", "스파"]):
-        selling_points.append("1일1마사지")
-    if any(x in hash_str for x in ["자유", "세미", "에어텔"]):
-        selling_points.append("자유일정포함")
-    if any(x in hash_str for x in ["크루즈", "요트"]) and "디너크루즈" not in hash_str:
-        selling_points.append("요트크루즈")
-        
-    # 만약 매칭된 상위 혜택이 부족하면 실제 해시태그 중 유니크한 6자 이하 명사 추출
+    if "노쇼핑" in combined_text or "NO쇼핑" in combined_text: selling_points.append("노쇼핑")
+    if "노옵션" in combined_text or "NO옵션" in combined_text: selling_points.append("노팁노옵션")
+    if "5성" in combined_text or "초특급" in combined_text: selling_points.append("특급호텔숙박")
+    if "마사지" in combined_text or "스파" in combined_text: selling_points.append("1일1마사지")
+    if "크루즈" in combined_text or "요트" in combined_text: selling_points.append("크루즈투어")
+    if "홈쇼핑" in combined_text: selling_points.append("홈쇼핑히트")
+    
     while len(selling_points) < 2 and hashtags:
         candidate = hashtags.pop(0)
         if len(candidate) <= 6 and candidate not in selling_points and "추천" not in candidate:
             selling_points.append(candidate)
-            
-    selling_prefix = f"[{'/'.join(selling_points)}]" if selling_points else "[추천패키지]"
+    
+    benefit_tag = " ".join(selling_points) if selling_points else "출발확정인기상품"
 
-    # 6. 세부 랜드마크 코스 추출을 통한 중복 파괴
+    # 7. 유니크 랜드마크 코스 추출 (중복 상품 묶임 파괴용 쐐기)
     unique_spot = ""
     spots_pool = [
         "담넌사두억", "위험한기찻길", "니모섬", "아유타야", "왓아룬", "진리의성전", "농눅빌리지",
         "디너크루즈", "마하나콘", "후아힌", "시밀란", "카오락", "팡아만", "피피섬", "끄라비", 
-        "치앙라이", "치앙다오", "몬쨈", "도이인타논", "도이수텝", "르메르디앙"
+        "치앙라이", "치앙다오", "몬쨈", "도이인타논", "도이수텝", "북해도", "삿포로", "오사카",
+        "오타루", "노보리베츠", "발칸", "체코", "부다페스트", "크로아티아", "프라하", "센토사",
+        "시드니", "유후인", "시모노세키", "마카오", "홍콩", "세부", "보홀", "대마도", "카파도키아"
     ]
     for spot in spots_pool:
-        if spot in hash_str or spot in title_body:
-            unique_spot = f"{spot} 중심코스 "
+        if spot in combined_text:
+            unique_spot = f"{spot}관광코스 "
             break
 
-    # 7. 카테고리/지역명 자동 맵핑 및 예외 보정
+    # 8. 지역명 기본 매핑 및 예외 보정
     clean_region = region_name.replace("지역名 미상", "").replace("지역명 미상", "").strip()
     if not clean_region:
-        if "푸껫" in title_body: clean_region = "푸켓"
-        elif "치앙마이" in title_body: clean_region = "치앙마이"
-        elif "카오락" in title_body: clean_region = "카오락"
-        else: clean_region = "방콕 패키지"
+        if "푸껫" in combined_text or "푸켓" in combined_text: clean_region = "푸켓"
+        elif "치앙마이" in combined_text: clean_region = "치앙마이"
+        elif "북해도" in combined_text or "삿포로" in combined_text: clean_region = "일본 북해도"
+        elif "오사카" in combined_text: clean_region = "일본 오사카"
+        else: clean_region = "동남아"
 
-    # 8. 구조 1차 조립
-    raw_naver_title = f"{marketing_tag} {grade_prefix} {selling_prefix} {tpo_keyword} {clean_region} {unique_spot}{title_body}"
+    # 9. 명사 위주의 징검다리식 배열 구조 생성
+    raw_naver_title = f"{departure}{season_tag}{target_tag} {benefit_tag} {clean_region} {unique_spot}{title_body}"
     
-    # 🌟 [보완 포인트 1] 순서를 유지하면서 중복 텍스트/단어 완벽 제거
+    # 🌟 [보완 포인트 1] 순서 유지하며 단어 중복 제거 (dict.fromkeys 사용)
     words = raw_naver_title.split()
     unique_words = list(dict.fromkeys(words))
     clean_title = " ".join(unique_words)
     
-    # 🌟 [보완 포인트 2] 단어 단위로 세이프 커팅 (최대 75자 제한)
+    # 🌟 [보완 포인트 2] 단어 단위 세이프 커팅 (최대 75자 제한)
     max_length = 75
     if len(clean_title) > max_length:
         truncated = clean_title[:max_length]
@@ -200,7 +203,7 @@ async def run_crawler():
                             # 6. URL 조합
                             final_url = f"{current_url}"
 
-                            # 🌟 고도화된 네이버 최적화 상품명 변환 엔진 연동
+                            # 🌟 최종 업그레이드된 SEO 변환 로직 연동
                             naver_title = generate_naver_title(title, region_name)
 
                             all_products.append({
