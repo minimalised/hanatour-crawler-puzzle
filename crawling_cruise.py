@@ -1,3 +1,5 @@
+import os
+import json
 import asyncio
 import hashlib
 import pandas as pd
@@ -6,7 +8,12 @@ from google.oauth2.service_account import Credentials
 from playwright.async_api import async_playwright
 
 async def run_crawler():
-    # 1. 구글 스프레드시트에서 URL 리스트 가져오기
+    json_raw = os.environ.get("GOOGLE_JSON_RAW")
+    
+    if json_raw:
+        with open("secrets.json", "w", encoding="utf-8") as f:
+            f.write(json_raw)
+    
     print("🌐 [크루즈상품리스트] 시트에서 URL을 불러오는 중...")
     scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
     creds = Credentials.from_service_account_file('secrets.json', scopes=scopes)
@@ -16,17 +23,14 @@ async def run_crawler():
     try:
         source_doc = gc.open_by_key(source_spreadsheet_id)
         source_sheet = source_doc.worksheet("크루즈상품리스트")
-        # A열 데이터 가져오기
         raw_urls = source_sheet.col_values(1)
         
-        # 유효한 URL만 필터링 (http로 시작하는 데이터만)
         url_list = [url for url in raw_urls if url.strip().startswith("http")]
         print(f"✅ 총 {len(url_list)}개의 크루즈 URL을 확보했습니다.")
     except Exception as e:
         print(f"❌ URL 리스트 로드 중 에러 발생: {e}")
         return
 
-    # 2. Playwright 크롤링 시작
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         context = await browser.new_context(
@@ -60,16 +64,13 @@ async def run_crawler():
                             if not main_info or not img_check:
                                 continue
 
-                            # 1. 상품명 추출
                             title_el = await main_info.query_selector(".item_title")
                             title = (await title_el.inner_text()).strip() if title_el else "제목 없음"
 
-                            # 2. 가격 추출
                             price_el = await main_info.query_selector(".price")
                             price_raw = await price_el.inner_text() if price_el else "0"
                             price = "".join(filter(str.isdigit, price_raw))
 
-                            # 3. 평점 및 리뷰 수 추출
                             star_el = await main_info.query_selector(".icn.star")
                             if star_el:
                                 star_text = await star_el.inner_text()
@@ -81,27 +82,23 @@ async def run_crawler():
                                 rating = "0"
                                 review_count = "0"
 
-                            # 4. 이미지 URL 추출
                             img_el = await img_check.query_selector("img")
                             img_url = await img_el.get_attribute("src") if img_el else ""
                             if img_url and img_url.startswith("//"): 
                                 img_url = "https:" + img_url
 
-                            # 5. 고유 ID 생성
                             product_id = hashlib.md5(title.encode()).hexdigest()[:8]
-
-                            # 6. URL 조합
                             final_url = f"{current_url}"
 
                             all_products.append({
                                 "ID": product_id,
-                                "지역": region_name,
                                 "상품명": title,
                                 "가격": int(price) if price else 0,
-                                "평점": float(rating) if rating else 0.0,
-                                "리뷰수": int(review_count) if review_count else 0,
+                                "URL": final_url,
                                 "이미지URL": img_url,
-                                "URL": final_url
+                                "지역": region_name,
+                                "리뷰수": int(review_count) if review_count else 0,
+                                "평점": float(rating) if rating else 0.0
                             })
                         except Exception as e:
                             print(f"개별 상품 파싱 에러: {e}")
@@ -116,7 +113,6 @@ async def run_crawler():
                 print(f"❌ {current_url} 접속 에러: {e}")
                 continue
 
-        # 3. 결과 적재 (github_cruise 시트로 전송)
         if all_products:
             print("\n🚀 결과 스프레드시트 업데이트 시작...")
             target_spreadsheet_ids = [
@@ -125,11 +121,11 @@ async def run_crawler():
                 "1Hoq0N88mestsHXbIOjwue3OctXf7dvKkx99eieYFhAY",
                 "1BK4xUHQFrLjLTn6vE0jSuwqMvSU7ZMKIV-nPvmySPx8"
             ]
-            worksheet_name = "github_cruise"  # 크루즈용 시트 이름
+            worksheet_name = "github_cruise"
 
             try:
                 df = pd.DataFrame(all_products)
-                column_order = ["지역", "상품명", "가격", "평점", "리뷰수", "이미지URL", "URL", "ID"]
+                column_order = ["ID", "상품명", "가격", "URL", "이미지URL", "지역", "리뷰수", "평점"]
                 df = df[column_order]
                 data_to_upload = [df.columns.values.tolist()] + df.values.tolist()
 
