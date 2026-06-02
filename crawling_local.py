@@ -32,8 +32,6 @@ async def run_crawler():
         print(f"✅ 총 {len(url_list)}개의 URL을 확보했습니다.")
     except Exception as e:
         print(f"❌ URL 리스트를 가져오는 중 에러 발생 (시트명: {source_sheet_name}): {e}")
-        if json_raw and os.path.exists("secrets.json"):
-            os.remove("secrets.json")
         return
 
     async with async_playwright() as p:
@@ -153,9 +151,6 @@ async def run_crawler():
                 print(f"❌ 구글 시트 결과 적재 에러: {e}")
         
         await browser.close()
-
-    if json_raw and os.path.exists("secrets.json"):
-        os.remove("secrets.json")
 
 if __name__ == "__main__":
     asyncio.run(run_crawler())
