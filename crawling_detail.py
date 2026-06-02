@@ -215,7 +215,7 @@ async def run_crawler():
 
             try:
                 df = pd.DataFrame(all_products)
-                column_order = ["ID", "상품명", "네이버_상품명", "가격", "URL", "이미지URL", "지역", "리뷰수", "평점"]
+                column_order = ["ID", "상품명", "가격", "URL", "이미지URL", "지역", "리뷰수", "평점", "네이버_상품명"]
                 df = df[column_order]
                 data_to_upload = [df.columns.values.tolist()] + df.values.tolist()
 
