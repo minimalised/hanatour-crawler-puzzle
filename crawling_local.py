@@ -1,3 +1,5 @@
+import os
+import json
 import asyncio
 import hashlib
 import pandas as pd
@@ -6,13 +8,17 @@ from google.oauth2.service_account import Credentials
 from playwright.async_api import async_playwright
 
 async def run_crawler():
-    # 1. 구글 스프레드시트에서 URL 리스트 가져오기
+    json_raw = os.environ.get("GOOGLE_JSON_RAW")
+    
+    if json_raw:
+        with open("secrets.json", "w", encoding="utf-8") as f:
+            f.write(json_raw)
+    
     print("🌐 스프레드시트에서 지방출발 URL 리스트를 불러오는 중...")
     scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
     creds = Credentials.from_service_account_file('secrets.json', scopes=scopes)
     gc = gspread.authorize(creds)
     
-    # URL이 담긴 원본 스프레드시트 ID
     source_spreadsheet_id = "1mH51VHs4y0FgClkUBvZgw7oY3Yv7gQBA_a3um9uhX0I"
     source_sheet_name = "지방출발리스트"
     target_sheet_name = "github_local"
@@ -20,17 +26,16 @@ async def run_crawler():
     try:
         source_doc = gc.open_by_key(source_spreadsheet_id)
         source_sheet = source_doc.worksheet(source_sheet_name)
-        # A열의 모든 데이터를 가져옴
         raw_urls = source_sheet.col_values(1)  
         
-        # 빈 값 제외 및 유효한 URL만 필터링
         url_list = [url for url in raw_urls if url.startswith("http")]
         print(f"✅ 총 {len(url_list)}개의 URL을 확보했습니다.")
     except Exception as e:
         print(f"❌ URL 리스트를 가져오는 중 에러 발생 (시트명: {source_sheet_name}): {e}")
+        if json_raw and os.path.exists("secrets.json"):
+            os.remove("secrets.json")
         return
 
-    # 2. Playwright 크롤링 시작
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         context = await browser.new_context(
@@ -45,7 +50,6 @@ async def run_crawler():
             try:
                 await page.goto(current_url, wait_until="domcontentloaded", timeout=60000)
                 
-                # 지역명 추출 (기존 로직 유지)
                 try:
                     await page.wait_for_selector("a.js_show", timeout=10000)
                     region_name = (await page.inner_text("a.js_show")).strip()
@@ -56,7 +60,6 @@ async def run_crawler():
                 await asyncio.sleep(2)
 
                 try:
-                    # 상품 리스트 셀렉터 로직 유지
                     final_items = await page.query_selector_all(".prod_list_wrap ul.type > li")
                     for item in final_items:
                         try:
@@ -66,16 +69,13 @@ async def run_crawler():
                             if not main_info or not img_check:
                                 continue
 
-                            # 1. 상품명 추출
                             title_el = await main_info.query_selector(".item_title")
                             title = (await title_el.inner_text()).strip() if title_el else "제목 없음"
 
-                            # 2. 가격 추출
                             price_el = await main_info.query_selector(".price")
                             price_raw = await price_el.inner_text() if price_el else "0"
                             price = "".join(filter(str.isdigit, price_raw))
 
-                            # 3. 평점 및 리뷰 수 추출
                             star_el = await main_info.query_selector(".icn.star")
                             if star_el:
                                 star_text = await star_el.inner_text()
@@ -87,27 +87,23 @@ async def run_crawler():
                                 rating = "0"
                                 review_count = "0"
 
-                            # 4. 이미지 URL 추출
                             img_el = await img_check.query_selector("img")
                             img_url = await img_el.get_attribute("src") if img_el else ""
                             if img_url and img_url.startswith("//"): 
                                 img_url = "https:" + img_url
 
-                            # 5. 고유 ID 생성
                             product_id = hashlib.md5(title.encode()).hexdigest()[:8]
-
-                            # 6. URL 조합
                             final_url = f"{current_url}"
 
                             all_products.append({
                                 "ID": product_id,
-                                "지역": region_name,
                                 "상품명": title,
                                 "가격": int(price) if price else 0,
-                                "평점": float(rating) if rating else 0.0,
-                                "리뷰수": int(review_count) if review_count else 0,
+                                "URL": final_url,
                                 "이미지URL": img_url,
-                                "URL": final_url
+                                "지역": region_name,
+                                "리뷰수": int(review_count) if review_count else 0,
+                                "평점": float(rating) if rating else 0.0,
                             })
                         except Exception as e:
                             print(f"개별 상품 파싱 에러: {e}")
@@ -122,7 +118,6 @@ async def run_crawler():
                 print(f"❌ {current_url} 접속 에러: {e}")
                 continue
 
-        # 3. 결과 데이터를 다시 스프레드시트에 적재
         if all_products:
             print(f"\n🚀 결과 스프레드시트 업데이트 시작 (대상 시트: {target_sheet_name})...")
             target_spreadsheet_ids = [
@@ -134,7 +129,7 @@ async def run_crawler():
 
             try:
                 df = pd.DataFrame(all_products)
-                column_order = ["지역", "상품명", "가격", "평점", "리뷰수", "이미지URL", "URL", "ID"]
+                column_order = ["ID", "상품명", "가격", "URL", "이미지URL", "지역", "리뷰수", "평점"]
                 df = df[column_order]
                 data_to_upload = [df.columns.values.tolist()] + df.values.tolist()
 
@@ -142,7 +137,6 @@ async def run_crawler():
                     try:
                         doc = gc.open_by_key(spreadsheet_id)
                         
-                        # 시트 존재 여부 확인 후 없으면 생성
                         try:
                             sheet = doc.worksheet(target_sheet_name)
                         except gspread.exceptions.WorksheetNotFound:
@@ -159,6 +153,9 @@ async def run_crawler():
                 print(f"❌ 구글 시트 결과 적재 에러: {e}")
         
         await browser.close()
+
+    if json_raw and os.path.exists("secrets.json"):
+        os.remove("secrets.json")
 
 if __name__ == "__main__":
     asyncio.run(run_crawler())
