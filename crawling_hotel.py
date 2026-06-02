@@ -33,8 +33,6 @@ async def run_hotel_crawling():
         data_rows = master_sheet.get_all_values()[1:]
     except Exception as e:
         print(f"❌ 마스터 시트 로드 실패: {e}")
-        if json_raw and os.path.exists("secrets.json"):
-            os.remove("secrets.json")
         return
 
     async with async_playwright() as p:
@@ -98,9 +96,6 @@ async def run_hotel_crawling():
                 continue
 
         await browser.close()
-
-    if json_raw and os.path.exists("secrets.json"):
-        os.remove("secrets.json")
 
 if __name__ == "__main__":
     asyncio.run(run_hotel_crawling())
