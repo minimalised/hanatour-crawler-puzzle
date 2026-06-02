@@ -1,3 +1,5 @@
+import os
+import json
 import asyncio
 import hashlib
 import gspread
@@ -5,7 +7,12 @@ from google.oauth2.service_account import Credentials
 from playwright.async_api import async_playwright
 
 async def run_hotel_crawling():
-    # 1. 구글 시트 인증
+    json_raw = os.environ.get("GOOGLE_JSON_RAW")
+    
+    if json_raw:
+        with open("secrets.json", "w", encoding="utf-8") as f:
+            f.write(json_raw)
+
     scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
     creds = Credentials.from_service_account_file("secrets.json", scopes=scopes)
     gc = gspread.authorize(creds)
@@ -21,12 +28,13 @@ async def run_hotel_crawling():
         "1BK4xUHQFrLjLTn6vE0jSuwqMvSU7ZMKIV-nPvmySPx8"
     ]
 
-    # 마스터 시트에서 데이터 로드
     try:
         master_sheet = gc.open_by_key(MASTER_SHEET_ID).worksheet(READ_TAB_NAME)
         data_rows = master_sheet.get_all_values()[1:]
     except Exception as e:
         print(f"❌ 마스터 시트 로드 실패: {e}")
+        if json_raw and os.path.exists("secrets.json"):
+            os.remove("secrets.json")
         return
 
     async with async_playwright() as p:
@@ -50,10 +58,8 @@ async def run_hotel_crawling():
                 await page.wait_for_selector(".item_title", timeout=15000)
                 await asyncio.sleep(3)
 
-                # --- 데이터 추출 및 숫자 변환 ---
                 hotel_name = (await page.locator(".item_title").first.inner_text()).strip()
                 
-                # 1. 가격 추출 및 숫자형(int) 변환 (C열)
                 price_text = await page.locator(".ly_wrap .price").first.inner_text()
                 price_raw = "".join(filter(str.isdigit, price_text))
                 price = int(price_raw) if price_raw else 0
@@ -61,22 +67,17 @@ async def run_hotel_crawling():
                 img_el = page.locator(".htl_photo img").first
                 image_url = await img_el.get_attribute("src")
                 
-                # 2. 평점 추출 및 숫자형(float) 변환 (D열)
                 rating_raw = (await page.locator(".score_htl_wrap .star").first.inner_text()).strip()
                 rating = float(rating_raw) if rating_raw else 0.0
                 
-                # 3. 리뷰수 추출 및 숫자형(int) 변환 (E열)
                 review_text = await page.locator(".score_htl_wrap em").first.inner_text()
                 review_raw = "".join(filter(str.isdigit, review_text))
                 review_count = int(review_raw) if review_raw else 0
                 
                 product_id = hashlib.md5(hotel_name.encode()).hexdigest()[:8]
 
-                # --- 컬럼 순서 맞춤 (A~H) ---
-                # A:지역, B:상품명, C:가격(int), D:평점(float), E:리뷰수(int), F:이미지URL, G:URL, H:ID
-                extracted_data = [[region, hotel_name, price, rating, review_count, image_url, url, product_id]]
+                extracted_data = [[product_id, hotel_name, price, url, image_url, region, review_count, rating]]
 
-                # --- 타겟 시트 적재 ---
                 for t_id in TARGET_SHEET_IDS:
                     try:
                         doc = gc.open_by_key(t_id)
@@ -86,7 +87,6 @@ async def run_hotel_crawling():
                             target_ws = doc.add_worksheet(title=WRITE_TAB_NAME, rows="1000", cols="20")
                             print(f"    💡 [{doc.title}]에 '{WRITE_TAB_NAME}' 탭 생성 완료")
                         
-                        # [핵심] value_input_option="USER_ENTERED"를 사용하여 숫자로 인식시킴
                         target_ws.update(f"A{i}:H{i}", extracted_data, value_input_option="USER_ENTERED")
                     except Exception as e:
                         print(f"    ⚠️ 업데이트 에러 (ID: {t_id}): {e}")
@@ -98,6 +98,9 @@ async def run_hotel_crawling():
                 continue
 
         await browser.close()
+
+    if json_raw and os.path.exists("secrets.json"):
+        os.remove("secrets.json")
 
 if __name__ == "__main__":
     asyncio.run(run_hotel_crawling())
