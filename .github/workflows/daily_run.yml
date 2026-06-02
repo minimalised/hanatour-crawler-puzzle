@@ -2,13 +2,12 @@ name: Daily Hanatour Crawling
 
 on:
   schedule:
-    - cron: '0 23 * * *' # 매일 밤 11시 실행 (KST 오전 8시)
-  workflow_dispatch: # 수동 버튼 실행 가능
+    - cron: '0 23 * * *'
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    # [핵심] Playwright 전용 환경을 통째로 빌려옵니다. 
     container:
       image: mcr.microsoft.com/playwright:v1.46.0-noble
 
@@ -23,14 +22,15 @@ jobs:
 
       - name: Install dependencies
         run: |
-          # 1. pip를 최신화합니다 (명시적 경로 사용)
           python -m pip install --upgrade pip
-          
-          # 2. [수정] 일반 pip 대신 python -m pip를 사용하여 패키지를 설치합니다.
           python -m pip install pandas gspread google-auth playwright playwright-stealth
-          
-          # 3. [수정] 플레이라이트 브라우저 설치도 파이썬 모듈 방식으로 안전하게 호출합니다.
           python -m playwright install chromium
       
       - name: Run Existing Crawling
-        run: python -u crawling_detail.py
+        env:
+          GOOGLE_JSON_RAW: ${{ secrets.HANA_SECRET }}
+        run: |
+          python -u crawling.py
+          python -u crawling_cruise.py
+          python -u crawling_detail.py
+          python -u crawling_hotel.py
