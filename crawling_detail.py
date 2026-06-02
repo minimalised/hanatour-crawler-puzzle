@@ -34,7 +34,7 @@ def generate_naver_title(title, region_name):
             
     transport = ""
     if "대한항공" in combined_text: transport = "대한항공"
-    elif "아시아나" in combined_text: transport = "아시아나"
+    elif "아시아나" in combined_text: transport = "아시아na"
     elif "크루즈" in combined_text or "요트" in combined_text: transport = "크루즈"
     elif "선박" in combined_text or "배타고" in combined_text: transport = "배타고"
 
@@ -116,8 +116,6 @@ async def run_crawler():
         print(f"✅ 총 {len(url_list)}개의 URL을 확보했습니다.")
     except Exception as e:
         print(f"❌ URL 리스트를 가져오는 중 에러 발생: {e}")
-        if json_raw and os.path.exists("secrets.json"):
-            os.remove("secrets.json")
         return
 
     async with async_playwright() as p:
@@ -217,7 +215,7 @@ async def run_crawler():
 
             try:
                 df = pd.DataFrame(all_products)
-                column_order = ["ID", "상품명", "가격", "URL", "이미지URL", "지역", "리뷰수", "평점", "네이버_상품명"]
+                column_order = ["ID", "상품명", "네이버_상품명", "가격", "URL", "이미지URL", "지역", "리뷰수", "평점"]
                 df = df[column_order]
                 data_to_upload = [df.columns.values.tolist()] + df.values.tolist()
 
@@ -235,9 +233,6 @@ async def run_crawler():
                 print(f"❌ 구글 시트 결과 적재 에러: {e}")
         
         await browser.close()
-
-    if json_raw and os.path.exists("secrets.json"):
-        os.remove("secrets.json")
 
 if __name__ == "__main__":
     asyncio.run(run_crawler())
