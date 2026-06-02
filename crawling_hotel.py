@@ -53,24 +53,47 @@ async def run_hotel_crawling():
             
             try:
                 await page.goto(url, wait_until="domcontentloaded", timeout=40000)
-                await page.wait_for_selector(".item_title", timeout=15000)
-                await asyncio.sleep(3)
+                
+                hotel_name = "제목 없음"
+                price = 0
+                image_url = ""
+                rating = 0.0
+                review_count = 0
 
-                hotel_name = (await page.locator(".item_title").first.inner_text()).strip()
+                try:
+                    await page.wait_for_selector(".item_title", timeout=15000)
+                    await asyncio.sleep(3)
+                    hotel_name = (await page.locator(".item_title").first.inner_text()).strip()
+                except Exception as e:
+                    print(f"    ⚠️ 호텔명 추출 실패: {e}")
+
+                try:
+                    price_text = await page.locator(".ly_wrap .price").first.inner_text()
+                    price_raw = "".join(filter(str.isdigit, price_text))
+                    price = int(price_raw) if price_raw else 0
+                except Exception as e:
+                    print(f"    ⚠️ 가격 추출 실패: {e}")
                 
-                price_text = await page.locator(".ly_wrap .price").first.inner_text()
-                price_raw = "".join(filter(str.isdigit, price_text))
-                price = int(price_raw) if price_raw else 0
+                try:
+                    img_el = page.locator(".htl_photo img").first
+                    image_url = await img_el.get_attribute("src")
+                    if image_url and image_url.startswith("//"):
+                        image_url = "https:" + image_url
+                except Exception as e:
+                    print(f"    ⚠️ 이미지 URL 추출 실패: {e}")
                 
-                img_el = page.locator(".htl_photo img").first
-                image_url = await img_el.get_attribute("src")
+                try:
+                    rating_raw = (await page.locator(".score_htl_wrap .star").first.inner_text()).strip()
+                    rating = float(rating_raw) if rating_raw else 0.0
+                except Exception as e:
+                    print(f"    ⚠️ 평점 추출 실패: {e}")
                 
-                rating_raw = (await page.locator(".score_htl_wrap .star").first.inner_text()).strip()
-                rating = float(rating_raw) if rating_raw else 0.0
-                
-                review_text = await page.locator(".score_htl_wrap em").first.inner_text()
-                review_raw = "".join(filter(str.isdigit, review_text))
-                review_count = int(review_raw) if review_raw else 0
+                try:
+                    review_text = await page.locator(".score_htl_wrap em").first.inner_text()
+                    review_raw = "".join(filter(str.isdigit, review_text))
+                    review_count = int(review_raw) if review_raw else 0
+                except Exception as e:
+                    print(f"    ⚠️ 리뷰수 추출 실패: {e}")
                 
                 product_id = hashlib.md5(hotel_name.encode()).hexdigest()[:8]
 
