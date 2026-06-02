@@ -1,3 +1,5 @@
+import os
+import json
 import asyncio
 import hashlib
 import datetime
@@ -8,15 +10,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 from playwright.async_api import async_playwright
 
-# ==========================================
-# [최종완성] 상위 80개 스냅샷 기반 자연스러운 변조 엔진 함수
-# ==========================================
 def generate_naver_title(title, region_name):
-    """
-    기계적인 단어 대량 나열을 전면 배제하고, 실전 상위 80개 상품처럼 
-    자연스러운 샌드위치 믹스(앞단 교통/시즌 + 원본 바디 + 뒷단 타겟/혜택) 가공을 수행하는 함수
-    """
-    # 1. 원본 대괄호 등급 태그 및 해시태그 분리
     grade_tags = re.findall(r'\[.*?\]', title)
     grade_prefix = "".join(grade_tags) if grade_tags else ""
     
@@ -24,7 +18,6 @@ def generate_naver_title(title, region_name):
     title_body = parts[0].strip()
     hashtags = [h.strip() for h in parts[1:] if h.strip()]
     
-    # 원본 바디에서 대괄호 중복 제거하여 자연스러운 핵심 본문 확보
     for gt in grade_tags:
         title_body = title_body.replace(gt, "")
     title_body = " ".join(title_body.split()).strip()
@@ -32,7 +25,6 @@ def generate_naver_title(title, region_name):
     hash_str = " ".join(hashtags)
     combined_text = f"{title_body} {hash_str}"
 
-    # 2. [실전 80개 반영] 자연스러운 출발지 및 국적기/교통 특전 추출
     departure = ""
     departures = ["부산출발", "대구출발", "청주출발", "무안출발", "인천출발"]
     for dep in departures:
@@ -46,7 +38,6 @@ def generate_naver_title(title, region_name):
     elif "크루즈" in combined_text or "요트" in combined_text: transport = "크루즈"
     elif "선박" in combined_text or "배타고" in combined_text: transport = "배타고"
 
-    # 3. [인위적인 느낌 제거] 무작위 1개만 매칭되는 시즌 및 방학 키워드 풀
     season_pool = []
     now = datetime.datetime.now()
     if now.month in [5, 6, 7, 8]:
@@ -57,7 +48,6 @@ def generate_naver_title(title, region_name):
         season_pool = ["인기상품", "실시간예약", "추천여행지"]
     chosen_season = random.choice(season_pool)
 
-    # 4. [실전 80개 반영] 자연스러운 명사 나열형 타겟(TPO) 확장 풀
     target_pool = []
     if any(x in combined_text for x in ["효도", "부모님", "조부모", "환갑", "칠순"]):
         target_pool = ["부모님 효도여행", "가족휴양", "환갑여행추천"]
@@ -69,7 +59,6 @@ def generate_naver_title(title, region_name):
         target_pool = ["패키지여행", "해외여행코스", "추천자유일정"]
     chosen_target = random.choice(target_pool)
 
-    # 5. 해시태그 풀에서 진짜 핵심 알짜 특전 1개만 무작위 솎아내기
     benefit = ""
     benefits_pool = []
     if "노쇼핑" in combined_text or "NO쇼핑" in combined_text: benefits_pool.append("노쇼핑")
@@ -81,23 +70,19 @@ def generate_naver_title(title, region_name):
     if benefits_pool:
         benefit = random.choice(benefits_pool)
     elif hashtags:
-        # 조건에 걸리는 마케팅 키워드가 없으면 원본의 유니크 해시태그 중 가독성 좋은 단어 1개 매칭
         short_tags = [h for h in hashtags if len(h) <= 5 and "추천" not in h]
         if short_tags: benefit = random.choice(short_tags)
 
-    # 6. [샌드위치 구조식 조립] 기계적 나열을 타파하는 완성도 높은 변조 컴포징
     front_parts = [departure, transport, chosen_season]
     front_text = " ".join([f for f in front_parts if f]).strip()
     
     back_parts = [chosen_target, benefit]
     back_text = " ".join([b for b in back_parts if b]).strip()
     
-    # 최종 결합 (앞단 조합어 + 원본 타이틀 본문 + 뒷단 마케팅어)
     final_raw_title = f"{front_text} {title_body} {back_text}"
     
-    # 7. 단어 중복 필터링 및 단어 깨짐 현상 없는 세이프 커팅 (최대 75자 한도)
     words = final_raw_title.split()
-    unique_words = list(dict.fromkeys(words))  # 순서 보존 단어 중복 제거
+    unique_words = list(dict.fromkeys(words))
     clean_title = " ".join(unique_words)
     
     max_length = 75
@@ -111,7 +96,12 @@ def generate_naver_title(title, region_name):
 
 
 async def run_crawler():
-    # 1. 구글 스프레드시트에서 URL 리스트 가져오기
+    json_raw = os.environ.get("GOOGLE_JSON_RAW")
+    
+    if json_raw:
+        with open("secrets.json", "w", encoding="utf-8") as f:
+            f.write(json_raw)
+
     print("🌐 스프레드시트에서 URL 리스트를 불러오는 중...")
     scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
     creds = Credentials.from_service_account_file('secrets.json', scopes=scopes)
@@ -126,9 +116,10 @@ async def run_crawler():
         print(f"✅ 총 {len(url_list)}개의 URL을 확보했습니다.")
     except Exception as e:
         print(f"❌ URL 리스트를 가져오는 중 에러 발생: {e}")
+        if json_raw and os.path.exists("secrets.json"):
+            os.remove("secrets.json")
         return
 
-    # 2. Playwright 크롤링 시작
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         context = await browser.new_context(
@@ -162,16 +153,13 @@ async def run_crawler():
                             if not main_info or not img_check:
                                 continue
 
-                            # 1. 상품명 추출
                             title_el = await main_info.query_selector(".item_title")
                             title = (await title_el.inner_text()).strip() if title_el else "제목 없음"
 
-                            # 2. 가격 추출
                             price_el = await main_info.query_selector(".price")
                             price_raw = await price_el.inner_text() if price_el else "0"
                             price = "".join(filter(str.isdigit, price_raw))
 
-                            # 3. 평점 및 리뷰 수 추출
                             star_el = await main_info.query_selector(".icn.star")
                             if star_el:
                                 star_text = await star_el.inner_text()
@@ -183,31 +171,26 @@ async def run_crawler():
                                 rating = "0"
                                 review_count = "0"
 
-                            # 4. 이미지 URL 추출
                             img_el = await img_check.query_selector("img")
                             img_url = await img_el.get_attribute("src") if img_el else ""
                             if img_url and img_url.startswith("//"): 
                                 img_url = "https:" + img_url
 
-                            # 5. 고유 ID 생성
                             product_id = hashlib.md5(title.encode()).hexdigest()[:8]
-
-                            # 6. URL 조합
                             final_url = f"{current_url}"
 
-                            # 🌟 상위 80개 매칭 기반 자연스러운 믹싱 솔루션 구동
                             naver_title = generate_naver_title(title, region_name)
 
                             all_products.append({
                                 "ID": product_id,
-                                "지역": region_name,
                                 "상품명": title,
                                 "네이버_상품명": naver_title,
                                 "가격": int(price) if price else 0,
-                                "평점": float(rating) if rating else 0.0,
-                                "리뷰수": int(review_count) if review_count else 0,
+                                "URL": final_url,
                                 "이미지URL": img_url,
-                                "URL": final_url
+                                "지역": region_name,
+                                "리뷰수": int(review_count) if review_count else 0,
+                                "평점": float(rating) if rating else 0.0,
                             })
                         except Exception as e:
                             print(f"개별 상품 파싱 에러: {e}")
@@ -222,7 +205,6 @@ async def run_crawler():
                 print(f"❌ {current_url} 접속 에러: {e}")
                 continue
 
-        # 3. 결과 데이터를 다시 스프레드시트에 적재
         if all_products:
             print("\n🚀 결과 스프레드시트 업데이트 시작...")
             target_spreadsheet_ids = [
@@ -235,7 +217,7 @@ async def run_crawler():
 
             try:
                 df = pd.DataFrame(all_products)
-                column_order = ["지역", "상품명", "네이버_상품명", "가격", "평점", "리뷰수", "이미지URL", "URL", "ID"]
+                column_order = ["ID", "상품명", "가격", "URL", "이미지URL", "지역", "리뷰수", "평점", "네이버_상품명"]
                 df = df[column_order]
                 data_to_upload = [df.columns.values.tolist()] + df.values.tolist()
 
@@ -253,6 +235,9 @@ async def run_crawler():
                 print(f"❌ 구글 시트 결과 적재 에러: {e}")
         
         await browser.close()
+
+    if json_raw and os.path.exists("secrets.json"):
+        os.remove("secrets.json")
 
 if __name__ == "__main__":
     asyncio.run(run_crawler())
