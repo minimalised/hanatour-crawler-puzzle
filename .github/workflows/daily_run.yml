@@ -30,6 +30,9 @@ jobs:
         env:
           GOOGLE_JSON_RAW: ${{ secrets.HANA_SECRET }}
         run: |
+          python -u crawling.py
+          python -u crawling_cruise.py
           python -u crawling_detail.py
           python -u crawling_hotel.py
+          python -u crawling_local.py
           rm -f secrets.json
