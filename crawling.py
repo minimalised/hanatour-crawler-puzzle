@@ -96,11 +96,11 @@ async def run_crawler():
                                 "ID": product_id,
                                 "상품명": title,
                                 "가격": int(price) if price else 0,
-                                "URL": final_url
+                                "URL": final_url,
                                 "이미지URL": img_url,
                                 "지역": region_name,
                                 "리뷰수": int(review_count) if review_count else 0,
-                                "평점": float(rating) if rating else 0.0,
+                                "평점": float(rating) if rating else 0.0
                             })
                         except Exception as e:
                             print(f"개별 상품 파싱 에러: {e}")
@@ -127,7 +127,7 @@ async def run_crawler():
 
             try:
                 df = pd.DataFrame(all_products)
-                column_order = ["ID","상품명","가격","URL","이미지URL","지역","리뷰수","평점"]
+                column_order = ["ID", "상품명", "가격", "URL", "이미지URL", "지역", "리뷰수", "평점"]
                 df = df[column_order]
                 data_to_upload = [df.columns.values.tolist()] + df.values.tolist()
 
