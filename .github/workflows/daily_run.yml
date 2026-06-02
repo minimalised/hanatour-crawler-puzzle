@@ -34,3 +34,4 @@ jobs:
           python -u crawling_cruise.py
           python -u crawling_detail.py
           python -u crawling_hotel.py
+          rm -f secrets.json
