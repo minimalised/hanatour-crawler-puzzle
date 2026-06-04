@@ -7,15 +7,25 @@ from google.oauth2.service_account import Credentials
 from playwright.async_api import async_playwright
 
 async def run_hotel_crawling():
+    print("🌐 구글 API 인증 및 스프레드시트 연결 중...")
+    scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+    
+    # [최신 표준 안정화] 환경 변수에서 JSON 텍스트를 직접 읽어 메모리에서 바로 인증 (물리 파일 생성 X)
     json_raw = os.environ.get("GOOGLE_JSON_RAW")
     
-    if json_raw:
-        with open("secrets.json", "w", encoding="utf-8") as f:
-            f.write(json_raw)
-
-    scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-    creds = Credentials.from_service_account_file("secrets.json", scopes=scopes)
-    gc = gspread.authorize(creds)
+    try:
+        if json_raw:
+            # GitHub Actions 환경: 환경 변수를 딕셔너리로 파싱하여 직접 인증
+            service_account_info = json.loads(json_raw)
+            creds = Credentials.from_service_account_info(service_account_info, scopes=scopes)
+        else:
+            # 로컬 개발 환경: 기존처럼 프로젝트 내 secrets.json 파일 참조
+            creds = Credentials.from_service_account_file("secrets.json", scopes=scopes)
+            
+        gc = gspread.authorize(creds)
+    except Exception as auth_error:
+        print(f"❌ 구글 API 인증 실패: {auth_error}")
+        return
 
     MASTER_SHEET_ID = "1mH51VHs4y0FgClkUBvZgw7oY3Yv7gQBA_a3um9uhX0I"
     READ_TAB_NAME = "호텔상품리스트"
@@ -108,7 +118,12 @@ async def run_hotel_crawling():
                             target_ws = doc.add_worksheet(title=WRITE_TAB_NAME, rows="1000", cols="20")
                             print(f"    💡 [{doc.title}]에 '{WRITE_TAB_NAME}' 탭 생성 완료")
                         
-                        target_ws.update(f"A{i}:H{i}", extracted_data, value_input_option="USER_ENTERED")
+                        # [최신 표준 안정화] 명확한 범위(range_name) 및 values 인자 명시 구조로 업데이트
+                        target_ws.update(
+                            range_name=f"A{i}:H{i}", 
+                            values=extracted_data, 
+                            value_input_option="USER_ENTERED"
+                        )
                     except Exception as e:
                         print(f"    ⚠️ 업데이트 에러 (ID: {t_id}): {e}")
 
