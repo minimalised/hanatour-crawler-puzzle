@@ -28,6 +28,7 @@ jobs:
       
       - name: Run Existing Crawling
         env:
+          # 모든 파이썬 스크립트가 해당 환경 변수를 공통으로 안전하게 가져다 씁니다.
           GOOGLE_JSON_RAW: ${{ secrets.HANA_SECRET }}
         run: |
           python -u crawling.py
@@ -35,4 +36,3 @@ jobs:
           python -u crawling_detail.py
           python -u crawling_hotel.py
           python -u crawling_local.py
-          rm -f secrets.json
