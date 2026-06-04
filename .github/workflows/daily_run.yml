@@ -25,15 +25,8 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install pandas gspread google-auth playwright playwright-stealth
           python -m playwright install chromium
-      
-      # [핵심] 가상 컴퓨터가 켜지면 GitHub Secret(HANA_SECRET)을 읽어서 완벽한 'secrets.json' 파일을 만들어냅니다.
-      - name: Create secrets.json from GitHub Secret
-        run: |
-          cat << 'EOF' > secrets.json
-          ${{ secrets.HANA_SECRET }}
-          EOF
 
-      # 이제 파이썬 코드들이 평소처럼 프로젝트 폴더 안의 'secrets.json'을 정상적으로 찾아서 읽게 됩니다!
+      # 깃허브 저장소에 함께 올라간 secrets.json 파일을 크롤러들이 그대로 읽어서 실행합니다.
       - name: Run Existing Crawling
         run: |
           python -u crawling.py
