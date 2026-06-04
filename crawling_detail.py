@@ -96,17 +96,28 @@ def generate_naver_title(title, region_name):
 
 
 async def run_crawler():
+    print("🌐 구글 API 인증 및 스프레드시트 연결 중...")
+    scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+    
+    # [최신 표준 안정화] 환경 변수에서 JSON 텍스트를 직접 읽어 메모리에서 바로 인증 (물리 파일 생성 X)
     json_raw = os.environ.get("GOOGLE_JSON_RAW")
     
-    if json_raw:
-        with open("secrets.json", "w", encoding="utf-8") as f:
-            f.write(json_raw)
+    try:
+        if json_raw:
+            # GitHub Actions 환경: 환경 변수를 딕셔너리로 파싱하여 직접 인증
+            service_account_info = json.loads(json_raw)
+            creds = Credentials.from_service_account_info(service_account_info, scopes=scopes)
+        else:
+            # 로컬 개발 환경: 기존처럼 프로젝트 내 secrets.json 파일 참조
+            creds = Credentials.from_service_account_file('secrets.json', scopes=scopes)
+            
+        gc = gspread.authorize(creds)
+    except Exception as auth_error:
+        print(f"❌ 구글 API 인증 실패: {auth_error}")
+        return
 
+    # ------------------ URL 로드부 ------------------
     print("🌐 스프레드시트에서 URL 리스트를 불러오는 중...")
-    scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-    creds = Credentials.from_service_account_file('secrets.json', scopes=scopes)
-    gc = gspread.authorize(creds)
-    
     source_spreadsheet_id = "1mH51VHs4y0FgClkUBvZgw7oY3Yv7gQBA_a3um9uhX0I"
     try:
         source_doc = gc.open_by_key(source_spreadsheet_id)
@@ -118,6 +129,7 @@ async def run_crawler():
         print(f"❌ URL 리스트를 가져오는 중 에러 발생: {e}")
         return
 
+    # ------------------ 크롤링 실행부 ------------------
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         context = await browser.new_context(
@@ -203,6 +215,7 @@ async def run_crawler():
                 print(f"❌ {current_url} 접속 에러: {e}")
                 continue
 
+        # ------------------ 구글 시트 적재부 ------------------
         if all_products:
             print("\n🚀 결과 스프레드시트 업데이트 시작...")
             target_spreadsheet_ids = [
@@ -224,7 +237,9 @@ async def run_crawler():
                         doc = gc.open_by_key(spreadsheet_id)
                         sheet = doc.worksheet(worksheet_name)
                         sheet.clear()
-                        sheet.update(data_to_upload)
+                        
+                        # [최신 표준 안정화] 명확한 범위 지정 및 키워드 인자 전달 구조로 업그레이드
+                        sheet.update(range_name='A1', values=data_to_upload)
                         print(f"✅ 성공: [{doc.title}] 업데이트 완료")
                     except Exception as sheet_error:
                         print(f"⚠️ {spreadsheet_id} 업데이트 실패: {sheet_error}")
