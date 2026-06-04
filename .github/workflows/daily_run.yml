@@ -26,10 +26,13 @@ jobs:
           python -m pip install pandas gspread google-auth playwright playwright-stealth
           python -m playwright install chromium
       
+      # [변경 포인트] 실행 시점에 GitHub Secret(HANA_SECRET)을 읽어와서 secrets.json 파일을 직접 생성합니다.
+      - name: Create secrets.json from GitHub Secret
+        run: |
+          echo '${{ secrets.HANA_SECRET }}' > secrets.json
+
       - name: Run Existing Crawling
-        env:
-          # 모든 파이썬 스크립트가 해당 환경 변수를 공통으로 안전하게 가져다 씁니다.
-          GOOGLE_JSON_RAW: ${{ secrets.HANA_SECRET }}
+        # 파이썬 코드들이 로컬 모드처럼 secrets.json 파일을 직접 참조하므로 GOOGLE_JSON_RAW 환경 변수는 제외해도 됩니다.
         run: |
           python -u crawling.py
           python -u crawling_cruise.py
