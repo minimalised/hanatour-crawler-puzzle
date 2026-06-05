@@ -8,8 +8,8 @@ import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
 from playwright.async_api import async_playwright
-# 💡 [최종 교정] TypeError를 일으키던 모듈 참조 혼선을 잡기 위해 내부 파일 경로에서 stealth 함수를 직접 인젝션합니다.
-from playwright_stealth.stealth import stealth
+# [핵심 교정] 파이썬 패키지 내부 충돌을 방지하기 위해 모듈을 깨끗하게 통째로 가져옵니다.
+import playwright_stealth
 from openai import AsyncOpenAI
 
 # 1. OpenAI 비동기 클라이언트 초기화
@@ -126,8 +126,8 @@ async def run_crawler():
         )
         page = await context.new_page()
         
-        # 💡 [최종 교정] 강제 매칭 완료된 stealth 함수에 비동기 page 객체를 다이렉트로 인젝션합니다.
-        await stealth(page)
+        # [핵심 교정] 비동기 환경 전용 봇 차단 우회 API를 절대 경로로 오차 없이 직접 지정합니다.
+        await playwright_stealth.stealth_async(page)
 
         all_products = []
 
@@ -148,7 +148,7 @@ async def run_crawler():
                     continue
 
                 # ====================================================================
-                # 💥 대량 지연 로딩 상품을 위한 무한 스크롤 루프
+                # 대량 지연 로딩 상품을 위한 무한 스크롤 루프
                 # ====================================================================
                 print("⏳ 대량 인피니트 스크롤 동적 데이터 로딩을 시작합니다...")
                 last_height = await page.evaluate("document.body.scrollHeight")
@@ -175,7 +175,7 @@ async def run_crawler():
                     if scroll_count % 5 == 0:
                         print(f"   .. 현재 {scroll_count}회차 스크롤 다운 수행 중 ..")
                 
-                # 스크롤 종료 직후 돔 구조 동적 배치 여유 마진 버퍼 확보
+                # 스크롤 종료 직후 데이터 동적 배치 버퍼 여유 마진 2초 확보
                 await page.wait_for_timeout(2000)
                 # ====================================================================
 
@@ -292,7 +292,7 @@ async def run_crawler():
                         doc = gc.open_by_key(spreadsheet_id)
                         sheet = doc.worksheet(worksheet_name)
                         sheet.clear()
-                        # 💡 gspread 최신 v6 인자 순서 포맷인 (values, range_name) 규격을 준수합니다.
+                        # gspread 최신 v6 인자 순서 완벽 준수
                         sheet.update(values=data_to_upload, range_name='A1')
                         print(f"✅ 성공: [{doc.title}] 업데이트 완료")
                     except Exception as sheet_error:
