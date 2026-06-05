@@ -8,8 +8,8 @@ import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
 from playwright.async_api import async_playwright
-# 💡 [교정 1] 모듈 참조 혼선을 막고 내부 유일 핵심 API인 stealth를 직접 바인딩합니다.
-from playwright_stealth import stealth
+# 💡 [최종 교정] TypeError를 일으키던 모듈 참조 혼선을 잡기 위해 내부 파일 경로에서 stealth 함수를 직접 인젝션합니다.
+from playwright_stealth.stealth import stealth
 from openai import AsyncOpenAI
 
 # 1. OpenAI 비동기 클라이언트 초기화
@@ -126,7 +126,7 @@ async def run_crawler():
         )
         page = await context.new_page()
         
-        # 💡 [교정 2] 속성 에러 원천 차단: 단일 함수인 stealth를 직접 대입 호출합니다.
+        # 💡 [최종 교정] 강제 매칭 완료된 stealth 함수에 비동기 page 객체를 다이렉트로 인젝션합니다.
         await stealth(page)
 
         all_products = []
@@ -175,7 +175,7 @@ async def run_crawler():
                     if scroll_count % 5 == 0:
                         print(f"   .. 현재 {scroll_count}회차 스크롤 다운 수행 중 ..")
                 
-                # 💡 [교정 3] 스크롤 종료 직후 DOM 구조 재배치 지연 안정화 대기 마진 확보
+                # 스크롤 종료 직후 돔 구조 동적 배치 여유 마진 버퍼 확보
                 await page.wait_for_timeout(2000)
                 # ====================================================================
 
@@ -292,7 +292,7 @@ async def run_crawler():
                         doc = gc.open_by_key(spreadsheet_id)
                         sheet = doc.worksheet(worksheet_name)
                         sheet.clear()
-                        # 💡 [교정 4] gspread v3.x -> v6.x 파괴적 변경 반영: (values, range_name) 순서로 바르게 교정합니다.
+                        # 💡 gspread 최신 v6 인자 순서 포맷인 (values, range_name) 규격을 준수합니다.
                         sheet.update(values=data_to_upload, range_name='A1')
                         print(f"✅ 성공: [{doc.title}] 업데이트 완료")
                     except Exception as sheet_error:
