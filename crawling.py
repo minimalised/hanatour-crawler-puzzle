@@ -8,8 +8,9 @@ import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
 from playwright.async_api import async_playwright
-# 💡 [교정] 패키지 업데이트 규격에 맞춰 stealth 표준 함수를 로드합니다.
 from playwright_stealth import stealth
+# 💡 이 부분이 추가되어야 AsyncOpenAI 에러가 나지 않습니다.
+from openai import AsyncOpenAI
 
 # 1. OpenAI 비동기 클라이언트 초기화
 openai_client = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY", "YOUR_LOCAL_API_KEY"))
