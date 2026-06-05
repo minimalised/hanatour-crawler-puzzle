@@ -209,10 +209,13 @@ async def run_crawler():
                 print(f"🔄 {target_region} (출발: {target_airport}) 페이지 로딩 중...")
                 await page.goto(current_url, wait_until="domcontentloaded", timeout=30000)
                 
-                # 상단 개수 텍스트 로딩 버퍼 부여
-                await page.wait_for_timeout(2000)
+                # 💡 [가장 중요한 안전 장치] 상단 상품 개수를 보여주는 em 태그가 화면에 실제로 글자를 그릴 때까지 최대 10초간 대기합니다.
+                # 이 조치를 통해 방콕 페이지 로딩 속도 지연으로 숫자를 못 읽고 넘어가던 병목이 완벽히 해결됩니다.
+                try:
+                    await page.wait_for_selector(".option_wrap.result .count em", timeout=10000)
+                except Exception:
+                    pass
 
-                # 💡 [교정] 마케터님이 준 마크업 연산: .option_wrap.result .count em 에서 정확히 개수를 발라냅니다.
                 total_count = 20  # 기본값
                 try:
                     count_element = await page.query_selector(".option_wrap.result .count em")
@@ -220,33 +223,28 @@ async def run_crawler():
                         count_text = (await count_element.inner_text()).strip()
                         if count_text.isdigit():
                             total_count = int(count_text)
-                            print(f"   ↳ 🎯 마케터 지정 마크업 매칭 완료! 이 페이지의 총 상품 수: [{total_count}개]")
+                            print(f"   ↳ 🎯 총 상품 수 동기화 성공: [{total_count}개]")
                 except Exception as e:
-                    print(f"   ⚠️ 총 상품 수 추출 실패 (기본 20개로 작동): {e}")
+                    print(f"   ⚠️ 총 상품 수 추출 실패 (기본 20개 모드로 작동): {e}")
 
-                # 💡 [정밀 계산 스크롤] 20개당 1번씩만 깔끔하게 내립니다.
-                # (예: 61개면 (61 - 1) // 20 = 3번만 딱 스크롤 내리면 전수 노출 완료)
+                # 총 개수에 기반한 정밀 스크롤 계산
                 needed_scrolls = (total_count - 1) // 20 if total_count > 20 else 0
                 
                 if needed_scrolls > 0:
-                    print(f"   ↳ ⏳ 총 {total_count}개 확보를 위해 정확히 {needed_scrolls}번만 휠을 내립니다.")
+                    print(f"   ↳ ⏳ 전수 노출을 위해 정확히 {needed_scrolls}번만 스마트 스크롤을 내립니다.")
                     for scroll_step in range(1, needed_scrolls + 1):
-                        # 화면 끝으로 스크롤 하강
                         await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                        # 추가 20개 데이터 패킷이 넘어올 대기 시간 2초 배정
-                        await asyncio.sleep(2.0)
+                        await asyncio.sleep(2.0) # 패킷 렌더링 대기
                         
-                        # 스크롤 락 방지 튕기기 제어
                         await page.evaluate("window.scrollTo(0, document.body.scrollHeight - 300)")
                         await asyncio.sleep(0.3)
                         await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
                         
-                        # 동적 로딩 중간 개수 추적
                         current_items = await page.query_selector_all(".prod_list_wrap ul.type > li")
                         if len(current_items) >= total_count:
                             break
 
-                # 최종 확인 버퍼
+                # 최종 돔 동기화 대기 마진
                 await asyncio.sleep(1.0)
 
                 # ------------------------------------------------====================
@@ -254,7 +252,7 @@ async def run_crawler():
                 final_items = await page.query_selector_all(".prod_list_wrap ul.type > li")
                 print(f"📦 [확인] 최종 수집된 타겟 엘리먼트 총 {len(final_items)}개! 대량 일괄 병렬 LLM 연산을 실행합니다.")
                 
-                # 61번 순서대로 대기하지 않는 초고속 병렬화
+                # 초고속 병렬화
                 tasks = [
                     process_single_product(item, target_region, target_airport, current_url) 
                     for item in final_items
