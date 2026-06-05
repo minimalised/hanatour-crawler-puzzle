@@ -2,46 +2,103 @@ import os
 import json
 import asyncio
 import hashlib
+import datetime
+import re
 import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
 from playwright.async_api import async_playwright
+from openai import AsyncOpenAI
+
+# 1. OpenAI 비동기 클라이언트 초기화
+# GitHub Actions 환경에서는 Repository Secrets에 등록된 OPENAI_API_KEY를 자동으로 읽어옵니다.
+openai_client = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY", "YOUR_LOCAL_API_KEY"))
+
+async def generate_naver_titles_llm(data):
+    """
+    GPT-4o-mini를 활용하여 네이버 쇼핑 가이드에 맞춘 고정된 상품명 3개를 생성합니다.
+    temperature=0과 seed 고정으로 인풋이 같으면 아웃풋도 항상 완전히 동일합니다.
+    """
+    prompt = f"""
+당신은 네이버 쇼핑 검색 최적화(SEO) 기준에 맞춰 여행 상품명을 정제하고 재창조하는 마케팅 자동화 전문가입니다.
+제공된 정형 데이터를 바탕으로 가이드라인을 완벽히 준수하는 새로운 상품명 3개를 생성하세요.
+
+[입력 데이터]
+- 기준 상품명: {data['pure_title']}
+- 여행 지역: {data['region']}
+- 기간: {data['duration']}
+- 핵심 설명: {data['description']}
+- 추출 키워드: {data['hashtags']}
+
+[네이버 쇼핑 상품명 가이드라인]
+1. 글자 수: 공백 포함 최소 25자 ~ 최대 35자 사이로 구성한다. (40자 절대 초과 금지)
+2. 중복 제거: 상품명 내부에서 동일한 단어(ex: 방콕, 여행, 패키지 등)가 2회 이상 중복 나열되는 것을 절대 금지한다.
+3. 정제성: '신상품', '세이브', '특가', '대박', '★' 같은 홍보성 문구나 특수문자는 절대 포함하지 않는다.
+4. 필수 요소: [지역명], [여행기간], [핵심 셀링포인트 1~2개]의 단어 조합이어야 한다.
+5. 포맷: 문장이 아닌 명사형 키워드의 깔끔한 띄어쓰기 조합으로 구성한다.
+
+반드시 아래 JSON 포맷으로만 응답하세요. 다른 설명은 생략합니다.
+{{
+  "option_1": "[대구출발] 방콕 파타야 5일 5성호텔 패키지",
+  "option_2": "방콕 파타야 여행 5일 노옵션 디너크루즈",
+  "option_3": "가족휴양 추천 방콕 파타야 5일 타이마사지"
+}}
+"""
+    try:
+        response = await openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant that outputs JSON."},
+                {"role": "user", "content": prompt}
+            ],
+            response_format={"type": "json_object"},
+            temperature=0,  # 결정론적 결과 고정을 위해 무작위성 0 세팅
+            seed=42         # 시드 고정
+        )
+        
+        result_json = json.loads(response.choices[0].message.content)
+        return (
+            result_json.get("option_1", "").strip(),
+            result_json.get("option_2", "").strip(),
+            result_json.get("option_3", "").strip()
+        )
+    except Exception as e:
+        print(f"❌ LLM 상품명 생성 중 에러 발생: {e}")
+        return f"[Error] {data['pure_title']}", f"[Error] {data['region']}", f"[Error] {data['pure_title']}"
+
 
 async def run_crawler():
     print("🌐 구글 API 인증 및 스프레드시트 연결 중...")
     scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
     
-    # [최신 표준 안정화] 환경 변수에서 JSON 텍스트를 직접 읽어 메모리에서 바로 인증 (파일 생성 X)
     json_raw = os.environ.get("GOOGLE_JSON_RAW")
     
     try:
         if json_raw:
-            # GitHub Actions 환경: 환경 변수의 문자열을 딕셔너리로 파싱하여 직접 인증
             service_account_info = json.loads(json_raw)
             creds = Credentials.from_service_account_info(service_account_info, scopes=scopes)
         else:
-            # 로컬 개발 환경: 환경 변수가 없을 때는 기존처럼 로컬 secrets.json 파일 참조
             creds = Credentials.from_service_account_file('secrets.json', scopes=scopes)
             
         gc = gspread.authorize(creds)
     except Exception as auth_error:
         print(f"❌ 구글 API 인증 실패: {auth_error}")
         return
-    
+
     # ------------------ URL 로드부 ------------------
+    print("🌐 스프레드시트에서 URL 리스트를 불러오는 중...")
     source_spreadsheet_id = "1mH51VHs4y0FgClkUBvZgw7oY3Yv7gQBA_a3um9uhX0I"
     try:
         source_doc = gc.open_by_key(source_spreadsheet_id)
         source_sheet = source_doc.worksheet("상품리스트")
         raw_urls = source_sheet.col_values(1)
-        
         url_list = [url for url in raw_urls if url.startswith("http")]
         print(f"✅ 총 {len(url_list)}개의 URL을 확보했습니다.")
     except Exception as e:
         print(f"❌ URL 리스트를 가져오는 중 에러 발생: {e}")
         return
 
-    # ------------------ 크롤링 실행부 ------------------
+    # ------------------ 크롤링 및 LLM 변환 실행부 ------------------
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         context = await browser.new_context(
@@ -55,13 +112,6 @@ async def run_crawler():
         for current_url in url_list:
             try:
                 await page.goto(current_url, wait_until="domcontentloaded", timeout=60000)
-                
-                try:
-                    await page.wait_for_selector("a.js_show", timeout=10000)
-                    region_name = (await page.inner_text("a.js_show")).strip()
-                except:
-                    region_name = "지역명 미상"
-
                 await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
                 await asyncio.sleep(2)
 
@@ -75,42 +125,82 @@ async def run_crawler():
                             if not main_info or not img_check:
                                 continue
 
+                            # 1. 원본 풀 타이틀 가져오기
                             title_el = await main_info.query_selector(".item_title")
-                            title = (await title_el.inner_text()).strip() if title_el else "제목 없음"
+                            full_title = (await title_el.inner_text()).strip() if title_el else "제목 없음"
 
+                            # 2. 가변형 접두어([신상품] 등) 제거 및 타이틀 해시태그 분리
+                            pure_title_body = re.sub(r'\[.*?\]', '', full_title).strip()
+                            
+                            if "#" in pure_title_body:
+                                parts = pure_title_body.split("#")
+                                pure_title = parts[0].strip()
+                                title_hashtags = sorted([p.strip() for p in parts[1:] if p.strip()])
+                            else:
+                                pure_title = pure_title_body
+                                title_hashtags = []
+
+                            # 3. 하단 UI 해시태그 그룹 추가 수집
+                            hash_span_els = await main_info.query_selector_all(".hash_group span")
+                            ui_hashtags = [(await h.inner_text()).replace("#", "").strip() for h in hash_span_els]
+                            
+                            # 데이터 정렬을 통해 무작위성 완전 차단
+                            all_hashtags = sorted(list(set(title_hashtags + ui_hashtags)))
+
+                            # 4. 본문 요약 설명 추출
+                            desc_el = await main_info.query_selector(".item_text.stit")
+                            product_desc = (await desc_el.inner_text()).strip() if desc_el else ""
+
+                            # 5. 정확한 위치 정보 추출
+                            region_el = await main_info.query_selector("span.icn.pos")
+                            region_name = (await region_el.inner_text()).strip() if region_el else "지역명 미상"
+
+                            # 6. 정확한 여행 기간 추출
+                            duration_el = await main_info.query_selector("span.icn.cal")
+                            duration_text = (await duration_el.inner_text()).strip() if duration_el else ""
+                            duration = duration_text.replace("여행기간", "").strip()
+
+                            # 7. 가격 및 기타 메타데이터 추출
                             price_el = await main_info.query_selector(".price")
                             price_raw = await price_el.inner_text() if price_el else "0"
                             price = "".join(filter(str.isdigit, price_raw))
-
-                            star_el = await main_info.query_selector(".icn.star")
-                            if star_el:
-                                star_text = await star_el.inner_text()
-                                rating = star_text.split('(')[0].strip()
-                                review_count_el = await star_el.query_selector("em")
-                                review_count = await review_count_el.inner_text() if review_count_el else "0"
-                                review_count = "".join(filter(str.isdigit, review_count))
-                            else:
-                                rating = "0"
-                                review_count = "0"
 
                             img_el = await img_check.query_selector("img")
                             img_url = await img_el.get_attribute("src") if img_el else ""
                             if img_url and img_url.startswith("//"): 
                                 img_url = "https:" + img_url
 
-                            product_id = hashlib.md5(title.encode()).hexdigest()[:8]
+                            product_id = hashlib.md5(pure_title.encode()).hexdigest()[:8]
                             final_url = f"{current_url}"
+
+                            # -------------------------------------------------------------
+                            # 💥 [핵심] 정제된 데이터를 묶어 LLM(GPT) 호출 및 상품명 3개 확보
+                            # -------------------------------------------------------------
+                            ai_input_data = {
+                                "pure_title": pure_title,
+                                "region": region_name,
+                                "duration": duration,
+                                "description": product_desc,
+                                "hashtags": ", ".join(all_hashtags)
+                            }
+                            t1, t2, t3 = await generate_naver_titles_llm(ai_input_data)
+                            # -------------------------------------------------------------
 
                             all_products.append({
                                 "ID": product_id,
-                                "상품명": title,
+                                "상품명": pure_title,  # 마케팅 수식어가 빠진 깔끔한 원본
                                 "가격": int(price) if price else 0,
                                 "URL": final_url,
                                 "이미지URL": img_url,
                                 "지역": region_name,
-                                "리뷰수": int(review_count) if review_count else 0,
-                                "평점": float(rating) if rating else 0.0
+                                "네이버_상품명_1": t1,
+                                "네이버_상품명_2": t2,
+                                "네이버_상품명_3": t3
                             })
+                            
+                            # API 분당 호출 제한 방지 버퍼
+                            await asyncio.sleep(0.2)
+
                         except Exception as e:
                             print(f"개별 상품 파싱 에러: {e}")
                             continue
@@ -133,11 +223,12 @@ async def run_crawler():
                 "1Hoq0N88mestsHXbIOjwue3OctXf7dvKkx99eieYFhAY",
                 "1BK4xUHQFrLjLTn6vE0jSuwqMvSU7ZMKIV-nPvmySPx8"
             ]
-            worksheet_name = "github"
+            worksheet_name = "github_detail"
 
             try:
                 df = pd.DataFrame(all_products)
-                column_order = ["ID", "상품명", "가격", "URL", "이미지URL", "지역", "리뷰수", "평점"]
+                # 새로운 상품명 칼럼 3개를 포함하도록 업그레이드된 구조 지정
+                column_order = ["ID", "상품명", "가격", "URL", "이미지URL", "지역", "네이버_상품명_1", "네이버_상품명_2", "네이버_상품명_3"]
                 df = df[column_order]
                 data_to_upload = [df.columns.values.tolist()] + df.values.tolist()
 
@@ -146,8 +237,6 @@ async def run_crawler():
                         doc = gc.open_by_key(spreadsheet_id)
                         sheet = doc.worksheet(worksheet_name)
                         sheet.clear()
-                        
-                        # [최신 표준 안정화] 최신 버전에 대응하도록 범위 명시 및 키워드 인자(range_name, values) 사용
                         sheet.update(range_name='A1', values=data_to_upload)
                         print(f"✅ 성공: [{doc.title}] 업데이트 완료")
                     except Exception as sheet_error:
