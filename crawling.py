@@ -70,7 +70,7 @@ async def generate_naver_titles_llm(data):
 
 async def process_single_product(item, target_region, target_airport, current_url):
     """
-    개별 상품의 본문을 파싱하고 LLM 요청 데이터를 준비하여 비동기 실행 단위를 구성합니다.
+    개별 상품 정보를 추출하고 GPT-4o-mini 변환까지 비동기 태스크로 처리합니다.
     """
     try:
         main_info = await item.query_selector(":scope > .inr.right")
@@ -79,11 +79,9 @@ async def process_single_product(item, target_region, target_airport, current_ur
         if not main_info or not img_check:
             return None
 
-        # 1. 원본 풀 타이틀 가져오기
         title_el = await main_info.query_selector(".item_title")
         full_title = (await title_el.inner_text()).strip() if title_el else "제목 없음"
 
-        # 2. 가변형 접두어 제거 및 타이틀 해시태그 분리
         pure_title_body = re.sub(r'\[.*?\]', '', full_title).strip()
         
         if "#" in pure_title_body:
@@ -94,21 +92,17 @@ async def process_single_product(item, target_region, target_airport, current_ur
             pure_title = pure_title_body
             title_hashtags = []
 
-        # 3. 하단 UI 해시태그 그룹 추가 수집
         hash_span_els = await main_info.query_selector_all(".hash_group span")
         ui_hashtags = [(await h.inner_text()).replace("#", "").strip() for h in hash_span_els]
         all_hashtags = sorted(list(set(title_hashtags + ui_hashtags)))
 
-        # 4. 본문 요약 설명 추출
         desc_el = await main_info.query_selector(".item_text.stit")
         product_desc = (await desc_el.inner_text()).strip() if desc_el else ""
 
-        # 5. 정확한 여행 기간 추출
         duration_el = await main_info.query_selector("span.icn.cal")
         duration_text = (await duration_el.inner_text()).strip() if duration_el else ""
         duration = duration_text.replace("여행기간", "").strip()
 
-        # 6. 가격 및 기타 메타데이터 추출
         price_el = await main_info.query_selector(".price")
         price_raw = await price_el.inner_text() if price_el else "0"
         price = "".join(filter(str.isdigit, price_raw))
@@ -129,7 +123,6 @@ async def process_single_product(item, target_region, target_airport, current_ur
             "hashtags": ", ".join(all_hashtags)
         }
         
-        # 💡 [병렬 핵심] 개별 프로세스 안에서 LLM 함수 호출(await)을 대기선에 등록합니다.
         t1, t2, t3 = await generate_naver_titles_llm(ai_input_data)
 
         return {
@@ -145,7 +138,7 @@ async def process_single_product(item, target_region, target_airport, current_ur
             "네이버_상품명_3": t3
         }
     except Exception as e:
-        print(f"⚠️ 상품 개별 데이터 가공 실패 블록 무시: {e}")
+        print(f"⚠️ 개별 상품 추출 중 오류 패스: {e}")
         return None
 
 
@@ -214,70 +207,66 @@ async def run_crawler():
             
             try:
                 print(f"🔄 {target_region} (출발: {target_airport}) 페이지 로딩 중...")
-                await page.goto(current_url, wait_until="networkidle", timeout=60000)
+                await page.goto(current_url, wait_until="domcontentloaded", timeout=30000)
                 
+                # 상단 개수 텍스트 로딩 버퍼 부여
+                await page.wait_for_timeout(2000)
+
+                # 💡 [교정] 마케터님이 준 마크업 연산: .option_wrap.result .count em 에서 정확히 개수를 발라냅니다.
+                total_count = 20  # 기본값
                 try:
-                    await page.wait_for_selector(".prod_list_wrap ul.type > li", timeout=15000)
-                except Exception:
-                    print("   ⚠️ 상품 목록 레이아웃을 찾지 못했습니다. 다음으로 넘어갑니다.")
-                    continue
+                    count_element = await page.query_selector(".option_wrap.result .count em")
+                    if count_element:
+                        count_text = (await count_element.inner_text()).strip()
+                        if count_text.isdigit():
+                            total_count = int(count_text)
+                            print(f"   ↳ 🎯 마케터 지정 마크업 매칭 완료! 이 페이지의 총 상품 수: [{total_count}개]")
+                except Exception as e:
+                    print(f"   ⚠️ 총 상품 수 추출 실패 (기본 20개로 작동): {e}")
 
-                # ====================================================================
-                # 대량 데이터 전수 로딩을 위한 동적 스크롤
-                # ====================================================================
-                print(f"⏳ {target_region} 전체 상품 전수 수집을 위해 동적 스크롤을 가동합니다...")
+                # 💡 [정밀 계산 스크롤] 20개당 1번씩만 깔끔하게 내립니다.
+                # (예: 61개면 (61 - 1) // 20 = 3번만 딱 스크롤 내리면 전수 노출 완료)
+                needed_scrolls = (total_count - 1) // 20 if total_count > 20 else 0
                 
-                last_items_count = 0
-                same_count_ticks = 0
-                
-                for scroll_step in range(1, 36):
-                    await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                    await asyncio.sleep(3.5)
-                    
-                    await page.evaluate("window.scrollTo(0, document.body.scrollHeight - 800)")
-                    await asyncio.sleep(0.5)
-                    await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                    await asyncio.sleep(1.0)
-                    
-                    current_items = await page.query_selector_all(".prod_list_wrap ul.type > li")
-                    current_count = len(current_items)
-                    
-                    if scroll_step % 2 == 0:
-                        print(f"   .. 스크롤 {scroll_step}회차: 현재 화면에 로드 완료된 상품 [{current_count}개] ..")
-                    
-                    if current_count == last_items_count:
-                        same_count_ticks += 1
-                        if same_count_ticks >= 3:
-                            print("   ↳ ✅ 해당 페이지의 숨겨진 모든 상품을 완전히 다 불러왔습니다.")
-                            break
-                    else:
-                        same_count_ticks = 0
+                if needed_scrolls > 0:
+                    print(f"   ↳ ⏳ 총 {total_count}개 확보를 위해 정확히 {needed_scrolls}번만 휠을 내립니다.")
+                    for scroll_step in range(1, needed_scrolls + 1):
+                        # 화면 끝으로 스크롤 하강
+                        await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                        # 추가 20개 데이터 패킷이 넘어올 대기 시간 2초 배정
+                        await asyncio.sleep(2.0)
                         
-                    last_items_count = current_count
-                
-                await asyncio.sleep(1.5)
-                # ====================================================================
+                        # 스크롤 락 방지 튕기기 제어
+                        await page.evaluate("window.scrollTo(0, document.body.scrollHeight - 300)")
+                        await asyncio.sleep(0.3)
+                        await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                        
+                        # 동적 로딩 중간 개수 추적
+                        current_items = await page.query_selector_all(".prod_list_wrap ul.type > li")
+                        if len(current_items) >= total_count:
+                            break
 
-                # 최종적으로 확보된 상품 리스트 태그 그룹 배열 바인딩
+                # 최종 확인 버퍼
+                await asyncio.sleep(1.0)
+
+                # ------------------------------------------------====================
+
                 final_items = await page.query_selector_all(".prod_list_wrap ul.type > li")
-                print(f"📦 [확인] 최종 수집된 타겟 엘리먼트 총 {len(final_items)}개! 대량 초고속 병렬 LLM 처리를 전개합니다.")
+                print(f"📦 [확인] 최종 수집된 타겟 엘리먼트 총 {len(final_items)}개! 대량 일괄 병렬 LLM 연산을 실행합니다.")
                 
-                # 💡 [초고속 병렬화 핵심 버퍼 체인] 
-                # 61번 순서대로 기다리지 않고, 61개의 요청 비동기 태스크를 바구니에 다 담습니다.
+                # 61번 순서대로 대기하지 않는 초고속 병렬화
                 tasks = [
                     process_single_product(item, target_region, target_airport, current_url) 
                     for item in final_items
                 ]
                 
-                # 💥 바구니에 모인 61개의 OpenAI 요청을 일시에 서버로 일제 사격(Gathering) 합니다.
                 batch_results = await asyncio.gather(*tasks)
                 
-                # 성공적으로 치환 완료된 정형 데이터만 추려내서 전역 리스트에 누적 적재
                 for res in batch_results:
                     if res is not None:
                         all_products.append(res)
 
-                print(f"✅ {target_region} (출발지: {target_airport}) 일괄 연산 완료 ({len(all_products)}개 누적 완료)")
+                print(f"✅ {target_region} (출발지: {target_airport}) 완료 ({len(all_products)}개 전수 적재 대기)")
                 await asyncio.sleep(1)
 
             except Exception as e:
