@@ -68,6 +68,87 @@ async def generate_naver_titles_llm(data):
         return f"[Error] {data['pure_title']}", f"[Error] {data['region']}", f"[Error] {data['pure_title']}"
 
 
+async def process_single_product(item, target_region, target_airport, current_url):
+    """
+    개별 상품의 본문을 파싱하고 LLM 요청 데이터를 준비하여 비동기 실행 단위를 구성합니다.
+    """
+    try:
+        main_info = await item.query_selector(":scope > .inr.right")
+        img_check = await item.query_selector(":scope > .inr.img")
+        
+        if not main_info or not img_check:
+            return None
+
+        # 1. 원본 풀 타이틀 가져오기
+        title_el = await main_info.query_selector(".item_title")
+        full_title = (await title_el.inner_text()).strip() if title_el else "제목 없음"
+
+        # 2. 가변형 접두어 제거 및 타이틀 해시태그 분리
+        pure_title_body = re.sub(r'\[.*?\]', '', full_title).strip()
+        
+        if "#" in pure_title_body:
+            parts = pure_title_body.split("#")
+            pure_title = parts[0].strip()
+            title_hashtags = sorted([p.strip() for p in parts[1:] if p.strip()])
+        else:
+            pure_title = pure_title_body
+            title_hashtags = []
+
+        # 3. 하단 UI 해시태그 그룹 추가 수집
+        hash_span_els = await main_info.query_selector_all(".hash_group span")
+        ui_hashtags = [(await h.inner_text()).replace("#", "").strip() for h in hash_span_els]
+        all_hashtags = sorted(list(set(title_hashtags + ui_hashtags)))
+
+        # 4. 본문 요약 설명 추출
+        desc_el = await main_info.query_selector(".item_text.stit")
+        product_desc = (await desc_el.inner_text()).strip() if desc_el else ""
+
+        # 5. 정확한 여행 기간 추출
+        duration_el = await main_info.query_selector("span.icn.cal")
+        duration_text = (await duration_el.inner_text()).strip() if duration_el else ""
+        duration = duration_text.replace("여행기간", "").strip()
+
+        # 6. 가격 및 기타 메타데이터 추출
+        price_el = await main_info.query_selector(".price")
+        price_raw = await price_el.inner_text() if price_el else "0"
+        price = "".join(filter(str.isdigit, price_raw))
+
+        img_el = await img_check.query_selector("img")
+        img_url = await img_el.get_attribute("src") if img_el else ""
+        if img_url and img_url.startswith("//"): 
+            img_url = "https:" + img_url
+
+        product_id = hashlib.md5(pure_title.encode()).hexdigest()[:8]
+        
+        ai_input_data = {
+            "pure_title": pure_title,
+            "region": target_region,          
+            "departure_airport": target_airport, 
+            "duration": duration,
+            "description": product_desc,
+            "hashtags": ", ".join(all_hashtags)
+        }
+        
+        # 💡 [병렬 핵심] 개별 프로세스 안에서 LLM 함수 호출(await)을 대기선에 등록합니다.
+        t1, t2, t3 = await generate_naver_titles_llm(ai_input_data)
+
+        return {
+            "ID": product_id,
+            "상품명": pure_title,
+            "가격": int(price) if price else 0,
+            "URL": current_url,
+            "이미지URL": img_url,
+            "지정지역": target_region,
+            "출발공항": target_airport,
+            "네이버_상품명_1": t1,
+            "네이버_상품명_2": t2,
+            "네이버_상품명_3": t3
+        }
+    except Exception as e:
+        print(f"⚠️ 상품 개별 데이터 가공 실패 블록 무시: {e}")
+        return None
+
+
 async def run_crawler():
     print("🌐 구글 API 인증 및 스프레드시트 연결 중...")
     scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
@@ -133,124 +214,70 @@ async def run_crawler():
             
             try:
                 print(f"🔄 {target_region} (출발: {target_airport}) 페이지 로딩 중...")
-                await page.goto(current_url, wait_until="domcontentloaded", timeout=60000)
+                await page.goto(current_url, wait_until="networkidle", timeout=60000)
                 
-                # ====================================================================
-                # 💥 대량 지연 로딩 상품을 위한 무한 스크롤 루프
-                # ====================================================================
-                print("⏳ 대량 인피니트 스크롤 동적 데이터 로딩을 시작합니다...")
-                last_height = await page.evaluate("document.body.scrollHeight")
-                scroll_count = 0
-                max_scrolls = 40  
-
-                while scroll_count < max_scrolls:
-                    await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                    await asyncio.sleep(2.0)
-                    
-                    new_height = await page.evaluate("document.body.scrollHeight")
-                    
-                    if new_height == last_height:
-                        await page.evaluate("window.scrollTo(0, document.body.scrollHeight - 600)")
-                        await asyncio.sleep(1.0)
-                        await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                        
-                        if new_height == await page.evaluate("document.body.scrollHeight"):
-                            print("   ↳ ✅ 해당 페이지의 모든 상품 로딩을 완료했습니다.")
-                            break
-                            
-                    last_height = new_height
-                    scroll_count += 1
-                    if scroll_count % 5 == 0:
-                        print(f"   .. 현재 {scroll_count}회차 스크롤 다운 수행 중 ..")
-                
-                await page.wait_for_timeout(1000)
-                # ====================================================================
-
                 try:
-                    final_items = await page.query_selector_all(".prod_list_wrap ul.type > li")
-                    print(f"📦 최종 타겟 엘리먼트 {len(final_items)}개 감지. 데이터 전처리 및 LLM 치환 시작...")
+                    await page.wait_for_selector(".prod_list_wrap ul.type > li", timeout=15000)
+                except Exception:
+                    print("   ⚠️ 상품 목록 레이아웃을 찾지 못했습니다. 다음으로 넘어갑니다.")
+                    continue
+
+                # ====================================================================
+                # 대량 데이터 전수 로딩을 위한 동적 스크롤
+                # ====================================================================
+                print(f"⏳ {target_region} 전체 상품 전수 수집을 위해 동적 스크롤을 가동합니다...")
+                
+                last_items_count = 0
+                same_count_ticks = 0
+                
+                for scroll_step in range(1, 36):
+                    await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                    await asyncio.sleep(3.5)
                     
-                    for item in final_items:
-                        try:
-                            main_info = await item.query_selector(":scope > .inr.right")
-                            img_check = await item.query_selector(":scope > .inr.img")
-                            
-                            if not main_info or not img_check:
-                                continue
+                    await page.evaluate("window.scrollTo(0, document.body.scrollHeight - 800)")
+                    await asyncio.sleep(0.5)
+                    await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                    await asyncio.sleep(1.0)
+                    
+                    current_items = await page.query_selector_all(".prod_list_wrap ul.type > li")
+                    current_count = len(current_items)
+                    
+                    if scroll_step % 2 == 0:
+                        print(f"   .. 스크롤 {scroll_step}회차: 현재 화면에 로드 완료된 상품 [{current_count}개] ..")
+                    
+                    if current_count == last_items_count:
+                        same_count_ticks += 1
+                        if same_count_ticks >= 3:
+                            print("   ↳ ✅ 해당 페이지의 숨겨진 모든 상품을 완전히 다 불러왔습니다.")
+                            break
+                    else:
+                        same_count_ticks = 0
+                        
+                    last_items_count = current_count
+                
+                await asyncio.sleep(1.5)
+                # ====================================================================
 
-                            # 1. 원본 풀 타이틀 가져오기
-                            title_el = await main_info.query_selector(".item_title")
-                            full_title = (await title_el.inner_text()).strip() if title_el else "제목 없음"
+                # 최종적으로 확보된 상품 리스트 태그 그룹 배열 바인딩
+                final_items = await page.query_selector_all(".prod_list_wrap ul.type > li")
+                print(f"📦 [확인] 최종 수집된 타겟 엘리먼트 총 {len(final_items)}개! 대량 초고속 병렬 LLM 처리를 전개합니다.")
+                
+                # 💡 [초고속 병렬화 핵심 버퍼 체인] 
+                # 61번 순서대로 기다리지 않고, 61개의 요청 비동기 태스크를 바구니에 다 담습니다.
+                tasks = [
+                    process_single_product(item, target_region, target_airport, current_url) 
+                    for item in final_items
+                ]
+                
+                # 💥 바구니에 모인 61개의 OpenAI 요청을 일시에 서버로 일제 사격(Gathering) 합니다.
+                batch_results = await asyncio.gather(*tasks)
+                
+                # 성공적으로 치환 완료된 정형 데이터만 추려내서 전역 리스트에 누적 적재
+                for res in batch_results:
+                    if res is not None:
+                        all_products.append(res)
 
-                            # 2. 가변형 접두어 제거 및 타이틀 해시태그 분리
-                            pure_title_body = re.sub(r'\[.*?\]', '', full_title).strip()
-                            
-                            if "#" in pure_title_body:
-                                parts = pure_title_body.split("#")
-                                pure_title = parts[0].strip()
-                                title_hashtags = sorted([p.strip() for p in parts[1:] if p.strip()])
-                            else:
-                                pure_title = pure_title_body
-                                title_hashtags = []
-
-                            # 3. 하단 UI 해시태그 그룹 추가 수집
-                            hash_span_els = await main_info.query_selector_all(".hash_group span")
-                            ui_hashtags = [(await h.inner_text()).replace("#", "").strip() for h in hash_span_els]
-                            all_hashtags = sorted(list(set(title_hashtags + ui_hashtags)))
-
-                            # 4. 본문 요약 설명 추출
-                            desc_el = await main_info.query_selector(".item_text.stit")
-                            product_desc = (await desc_el.inner_text()).strip() if desc_el else ""
-
-                            # 5. 정확한 여행 기간 추출
-                            duration_el = await main_info.query_selector("span.icn.cal")
-                            duration_text = (await duration_el.inner_text()).strip() if duration_el else ""
-                            duration = duration_text.replace("여행기간", "").strip()
-
-                            # 6. 가격 및 기타 메타데이터 추출
-                            price_el = await main_info.query_selector(".price")
-                            price_raw = await price_el.inner_text() if price_el else "0"
-                            price = "".join(filter(str.isdigit, price_raw))
-
-                            img_el = await img_check.query_selector("img")
-                            img_url = await img_el.get_attribute("src") if img_el else ""
-                            if img_url and img_url.startswith("//"): 
-                                img_url = "https:" + img_url
-
-                            product_id = hashlib.md5(pure_title.encode()).hexdigest()[:8]
-                            
-                            ai_input_data = {
-                                "pure_title": pure_title,
-                                "region": target_region,          
-                                "departure_airport": target_airport, 
-                                "duration": duration,
-                                "description": product_desc,
-                                "hashtags": ", ".join(all_hashtags)
-                            }
-                            t1, t2, t3 = await generate_naver_titles_llm(ai_input_data)
-
-                            all_products.append({
-                                "ID": product_id,
-                                "상품명": pure_title,
-                                "가격": int(price) if price else 0,
-                                "URL": current_url,
-                                "이미지URL": img_url,
-                                "지정지역": target_region,
-                                "출발공항": target_airport,
-                                "네이버_상품명_1": t1,
-                                "네이버_상품명_2": t2,
-                                "네이버_상품명_3": t3
-                            })
-                            
-                            await asyncio.sleep(0.5)
-
-                        except Exception as e:
-                            print(f"개별 상품 파싱 에러: {e}")
-                            continue
-                except Exception as e:
-                    print(f"파싱 리스트 획득 에러: {e}")
-
-                print(f"✅ {target_region} (출발지: {target_airport}) 완료 ({len(all_products)}개 누적 완료)")
+                print(f"✅ {target_region} (출발지: {target_airport}) 일괄 연산 완료 ({len(all_products)}개 누적 완료)")
                 await asyncio.sleep(1)
 
             except Exception as e:
