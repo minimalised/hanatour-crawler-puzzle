@@ -79,9 +79,11 @@ async def process_single_product(item, target_region, target_airport, current_ur
         if not main_info or not img_check:
             return None
 
+        # 1. 원본 풀 타이틀 가져오기
         title_el = await main_info.query_selector(".item_title")
         full_title = (await title_el.inner_text()).strip() if title_el else "제목 없음"
 
+        # 2. 가변형 접두어 제거 및 타이틀 해시태그 분리 (정제 상품명용)
         pure_title_body = re.sub(r'\[.*?\]', '', full_title).strip()
         
         if "#" in pure_title_body:
@@ -92,17 +94,21 @@ async def process_single_product(item, target_region, target_airport, current_ur
             pure_title = pure_title_body
             title_hashtags = []
 
+        # 3. 하단 UI 해시태그 그룹 추가 수집
         hash_span_els = await main_info.query_selector_all(".hash_group span")
         ui_hashtags = [(await h.inner_text()).replace("#", "").strip() for h in hash_span_els]
         all_hashtags = sorted(list(set(title_hashtags + ui_hashtags)))
 
+        # 4. 본문 요약 설명 추출
         desc_el = await main_info.query_selector(".item_text.stit")
         product_desc = (await desc_el.inner_text()).strip() if desc_el else ""
 
+        # 5. 정확한 여행 기간 추출
         duration_el = await main_info.query_selector("span.icn.cal")
         duration_text = (await duration_el.inner_text()).strip() if duration_el else ""
         duration = duration_text.replace("여행기간", "").strip()
 
+        # 6. 가격 및 기타 메타데이터 추출
         price_el = await main_info.query_selector(".price")
         price_raw = await price_el.inner_text() if price_el else "0"
         price = "".join(filter(str.isdigit, price_raw))
@@ -112,7 +118,8 @@ async def process_single_product(item, target_region, target_airport, current_ur
         if img_url and img_url.startswith("//"): 
             img_url = "https:" + img_url
 
-        product_id = hashlib.md5(pure_title.encode()).hexdigest()[:8]
+        # 💡 [핵심 교정] ID 중복 근절: 글자 하나만 달라도 유일값이 나오도록 'full_title(원본명)' 기준으로 해시 아이디를 생성합니다.
+        product_id = hashlib.md5(full_title.encode()).hexdigest()[:8]
         
         ai_input_data = {
             "pure_title": pure_title,
@@ -125,9 +132,11 @@ async def process_single_product(item, target_region, target_airport, current_ur
         
         t1, t2, t3 = await generate_naver_titles_llm(ai_input_data)
 
+        # 💡 원본상품명과 정제상품명을 명확히 분리하여 데이터 구조를 확장합니다.
         return {
             "ID": product_id,
-            "상품명": pure_title,
+            "원본상품명": full_title,
+            "정제상품명": pure_title,
             "가격": int(price) if price else 0,
             "URL": current_url,
             "이미지URL": img_url,
@@ -209,14 +218,12 @@ async def run_crawler():
                 print(f"🔄 {target_region} (출발: {target_airport}) 페이지 로딩 중...")
                 await page.goto(current_url, wait_until="domcontentloaded", timeout=30000)
                 
-                # 💡 [가장 중요한 안전 장치] 상단 상품 개수를 보여주는 em 태그가 화면에 실제로 글자를 그릴 때까지 최대 10초간 대기합니다.
-                # 이 조치를 통해 방콕 페이지 로딩 속도 지연으로 숫자를 못 읽고 넘어가던 병목이 완벽히 해결됩니다.
                 try:
                     await page.wait_for_selector(".option_wrap.result .count em", timeout=10000)
                 except Exception:
                     pass
 
-                total_count = 20  # 기본값
+                total_count = 20  
                 try:
                     count_element = await page.query_selector(".option_wrap.result .count em")
                     if count_element:
@@ -227,14 +234,13 @@ async def run_crawler():
                 except Exception as e:
                     print(f"   ⚠️ 총 상품 수 추출 실패 (기본 20개 모드로 작동): {e}")
 
-                # 총 개수에 기반한 정밀 스크롤 계산
                 needed_scrolls = (total_count - 1) // 20 if total_count > 20 else 0
                 
                 if needed_scrolls > 0:
                     print(f"   ↳ ⏳ 전수 노출을 위해 정확히 {needed_scrolls}번만 스마트 스크롤을 내립니다.")
                     for scroll_step in range(1, needed_scrolls + 1):
                         await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                        await asyncio.sleep(2.0) # 패킷 렌더링 대기
+                        await asyncio.sleep(2.0)
                         
                         await page.evaluate("window.scrollTo(0, document.body.scrollHeight - 300)")
                         await asyncio.sleep(0.3)
@@ -244,15 +250,11 @@ async def run_crawler():
                         if len(current_items) >= total_count:
                             break
 
-                # 최종 돔 동기화 대기 마진
                 await asyncio.sleep(1.0)
-
-                # ------------------------------------------------====================
 
                 final_items = await page.query_selector_all(".prod_list_wrap ul.type > li")
                 print(f"📦 [확인] 최종 수집된 타겟 엘리먼트 총 {len(final_items)}개! 대량 일괄 병렬 LLM 연산을 실행합니다.")
                 
-                # 초고속 병렬화
                 tasks = [
                     process_single_product(item, target_region, target_airport, current_url) 
                     for item in final_items
@@ -284,7 +286,8 @@ async def run_crawler():
 
             try:
                 df = pd.DataFrame(all_products)
-                column_order = ["ID", "상품명", "가격", "URL", "이미지URL", "지정지역", "출발공항", "네이버_상품명_1", "네이버_상품명_2", "네이버_상품명_3"]
+                # 💡 [스키마 업데이트] 원본상품명과 정제상품명을 순서대로 시트에 배치하도록 재정의합니다.
+                column_order = ["ID", "원본상품명", "정제상품명", "가격", "URL", "이미지URL", "지정지역", "출발공항", "네이버_상품명_1", "네이버_상품명_2", "네이버_상품명_3"]
                 df = df[column_order]
                 data_to_upload = [df.columns.values.tolist()] + df.values.tolist()
 
