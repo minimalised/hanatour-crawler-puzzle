@@ -8,9 +8,8 @@ import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
 from playwright.async_api import async_playwright
-# 💡 [교정 1] 모듈을 통째로 가져와 내부 비동기 함수 명세에 접근할 수 있도록 세팅합니다.
-import playwright_stealth
-# 💡 [교정 2] NameApp 에러가 나지 않도록 OpenAI 비동기 클라이언트를 명확히 로드합니다.
+# 💡 [교정 1] 모듈 참조 혼선을 막고 내부 유일 핵심 API인 stealth를 직접 바인딩합니다.
+from playwright_stealth import stealth
 from openai import AsyncOpenAI
 
 # 1. OpenAI 비동기 클라이언트 초기화
@@ -127,8 +126,8 @@ async def run_crawler():
         )
         page = await context.new_page()
         
-        # 💡 [교정 3] 가상 실행 환경에서 봇 방화벽을 원천 무력화하는 비동기 전용 스텔스 함수를 바르게 구동합니다.
-        await playwright_stealth.stealth_async(page)
+        # 💡 [교정 2] 속성 에러 원천 차단: 단일 함수인 stealth를 직접 대입 호출합니다.
+        await stealth(page)
 
         all_products = []
 
@@ -141,7 +140,6 @@ async def run_crawler():
                 print(f"🔄 {target_region} (출발: {target_airport}) 페이지 로딩 중...")
                 await page.goto(current_url, wait_until="networkidle", timeout=60000)
                 
-                # 💡 비어있는 화면 스크롤 하강을 원천 방지하기 위해 콘텐트 박스가 로딩될 때까지 대기 안전핀을 작동합니다.
                 try:
                     await page.wait_for_selector(".prod_list_wrap", timeout=15000)
                     print("   ↳ 📦 상품 목록 레이아웃 감지 성공. 스크롤을 시작합니다.")
@@ -176,6 +174,9 @@ async def run_crawler():
                     scroll_count += 1
                     if scroll_count % 5 == 0:
                         print(f"   .. 현재 {scroll_count}회차 스크롤 다운 수행 중 ..")
+                
+                # 💡 [교정 3] 스크롤 종료 직후 DOM 구조 재배치 지연 안정화 대기 마진 확보
+                await page.wait_for_timeout(2000)
                 # ====================================================================
 
                 try:
@@ -291,7 +292,8 @@ async def run_crawler():
                         doc = gc.open_by_key(spreadsheet_id)
                         sheet = doc.worksheet(worksheet_name)
                         sheet.clear()
-                        sheet.update(range_name='A1', values=data_to_upload)
+                        # 💡 [교정 4] gspread v3.x -> v6.x 파괴적 변경 반영: (values, range_name) 순서로 바르게 교정합니다.
+                        sheet.update(values=data_to_upload, range_name='A1')
                         print(f"✅ 성공: [{doc.title}] 업데이트 완료")
                     except Exception as sheet_error:
                         print(f"⚠️ {spreadsheet_id} 업데이트 실패: {sheet_error}")
