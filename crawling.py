@@ -71,7 +71,7 @@ async def generate_naver_titles_llm(data):
 
 async def run_crawler():
     print("🌐 구글 API 인증 및 스프레드시트 연결 중...")
-    scopes = ["https://www.googleapis.com/auth/sheets", "https://www.googleapis.com/auth/drive"]
+    scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
     
     json_raw = os.environ.get("GOOGLE_JSON_RAW")
     
