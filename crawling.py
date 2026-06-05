@@ -8,8 +8,9 @@ import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
 from playwright.async_api import async_playwright
-from playwright_stealth import stealth
-# 💡 이 부분이 추가되어야 AsyncOpenAI 에러가 나지 않습니다.
+# 💡 [교정 1] 모듈을 통째로 가져와 내부 비동기 함수 명세에 접근할 수 있도록 세팅합니다.
+import playwright_stealth
+# 💡 [교정 2] NameApp 에러가 나지 않도록 OpenAI 비동기 클라이언트를 명확히 로드합니다.
 from openai import AsyncOpenAI
 
 # 1. OpenAI 비동기 클라이언트 초기화
@@ -126,8 +127,8 @@ async def run_crawler():
         )
         page = await context.new_page()
         
-        # 💡 [교정] 최신 라이브러리 규격에 맞춰 표준 stealth 함수에 page를 주입합니다.
-        await stealth(page)
+        # 💡 [교정 3] 가상 실행 환경에서 봇 방화벽을 원천 무력화하는 비동기 전용 스텔스 함수를 바르게 구동합니다.
+        await playwright_stealth.stealth_async(page)
 
         all_products = []
 
@@ -140,7 +141,7 @@ async def run_crawler():
                 print(f"🔄 {target_region} (출발: {target_airport}) 페이지 로딩 중...")
                 await page.goto(current_url, wait_until="networkidle", timeout=60000)
                 
-                # 💡 상품 리스트(.prod_list_wrap) 박스가 완전히 렌더링 될 때까지 최대 15초 대기 조치 유지
+                # 💡 비어있는 화면 스크롤 하강을 원천 방지하기 위해 콘텐트 박스가 로딩될 때까지 대기 안전핀을 작동합니다.
                 try:
                     await page.wait_for_selector(".prod_list_wrap", timeout=15000)
                     print("   ↳ 📦 상품 목록 레이아웃 감지 성공. 스크롤을 시작합니다.")
@@ -149,7 +150,7 @@ async def run_crawler():
                     continue
 
                 # ====================================================================
-                # 💥 [고도화] 200개 이상 대량 지연 로딩 상품을 위한 무한 스크롤 루프
+                # 💥 대량 지연 로딩 상품을 위한 무한 스크롤 루프
                 # ====================================================================
                 print("⏳ 대량 인피니트 스크롤 동적 데이터 로딩을 시작합니다...")
                 last_height = await page.evaluate("document.body.scrollHeight")
