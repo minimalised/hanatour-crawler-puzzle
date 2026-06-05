@@ -8,8 +8,6 @@ import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
 from playwright.async_api import async_playwright
-# [핵심 교정] 파이썬 패키지 내부 충돌을 방지하기 위해 모듈을 깨끗하게 통째로 가져옵니다.
-import playwright_stealth
 from openai import AsyncOpenAI
 
 # 1. OpenAI 비동기 클라이언트 초기화
@@ -125,9 +123,6 @@ async def run_crawler():
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
         )
         page = await context.new_page()
-        
-        # [핵심 교정] 비동기 환경 전용 봇 차단 우회 API를 절대 경로로 오차 없이 직접 지정합니다.
-        await playwright_stealth.stealth_async(page)
 
         all_products = []
 
@@ -138,17 +133,10 @@ async def run_crawler():
             
             try:
                 print(f"🔄 {target_region} (출발: {target_airport}) 페이지 로딩 중...")
-                await page.goto(current_url, wait_until="networkidle", timeout=60000)
+                await page.goto(current_url, wait_until="domcontentloaded", timeout=60000)
                 
-                try:
-                    await page.wait_for_selector(".prod_list_wrap", timeout=15000)
-                    print("   ↳ 📦 상품 목록 레이아웃 감지 성공. 스크롤을 시작합니다.")
-                except Exception as layout_error:
-                    print(f"   ⚠️ 상품 목록 레이아웃을 찾지 못했습니다 (차단 혹은 비어있음): {layout_error}")
-                    continue
-
                 # ====================================================================
-                # 대량 지연 로딩 상품을 위한 무한 스크롤 루프
+                # 💥 대량 지연 로딩 상품을 위한 무한 스크롤 루프
                 # ====================================================================
                 print("⏳ 대량 인피니트 스크롤 동적 데이터 로딩을 시작합니다...")
                 last_height = await page.evaluate("document.body.scrollHeight")
@@ -157,7 +145,7 @@ async def run_crawler():
 
                 while scroll_count < max_scrolls:
                     await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                    await asyncio.sleep(2.5)
+                    await asyncio.sleep(2.0)
                     
                     new_height = await page.evaluate("document.body.scrollHeight")
                     
@@ -175,8 +163,7 @@ async def run_crawler():
                     if scroll_count % 5 == 0:
                         print(f"   .. 현재 {scroll_count}회차 스크롤 다운 수행 중 ..")
                 
-                # 스크롤 종료 직후 데이터 동적 배치 버퍼 여유 마진 2초 확보
-                await page.wait_for_timeout(2000)
+                await page.wait_for_timeout(1000)
                 # ====================================================================
 
                 try:
@@ -292,7 +279,6 @@ async def run_crawler():
                         doc = gc.open_by_key(spreadsheet_id)
                         sheet = doc.worksheet(worksheet_name)
                         sheet.clear()
-                        # gspread 최신 v6 인자 순서 완벽 준수
                         sheet.update(values=data_to_upload, range_name='A1')
                         print(f"✅ 성공: [{doc.title}] 업데이트 완료")
                     except Exception as sheet_error:
