@@ -8,9 +8,8 @@ import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
 from playwright.async_api import async_playwright
-from openai import AsyncOpenAI
-# 💡 봇 우회를 위한 stealth 패키지 로드
-from playwright_stealth import stealth_async
+# 💡 [교정] 패키지 업데이트 규격에 맞춰 stealth 표준 함수를 로드합니다.
+from playwright_stealth import stealth
 
 # 1. OpenAI 비동기 클라이언트 초기화
 openai_client = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY", "YOUR_LOCAL_API_KEY"))
@@ -126,8 +125,8 @@ async def run_crawler():
         )
         page = await context.new_page()
         
-        # 💡 [교정 1] 브라우저 백엔드에 사람처럼 행동하는 스텔스 모드 주입 (봇 방화벽 우회)
-        await stealth_async(page)
+        # 💡 [교정] 최신 라이브러리 규격에 맞춰 표준 stealth 함수에 page를 주입합니다.
+        await stealth(page)
 
         all_products = []
 
@@ -138,11 +137,9 @@ async def run_crawler():
             
             try:
                 print(f"🔄 {target_region} (출발: {target_airport}) 페이지 로딩 중...")
-                # 💡 페이지 로딩 조건을 무조건 다 받아올 때까지 기다리는 'networkidle'로 변경
                 await page.goto(current_url, wait_until="networkidle", timeout=60000)
                 
-                # 💡 [교정 2] 상품 리스트(.prod_list_wrap) 박스가 완전히 뜰 때까지 최대 15초 강제 대기
-                # 빈 화면인 상태에서 바로 스크롤 로직으로 넘어가 0개 감지되는 현상 전면 차단
+                # 💡 상품 리스트(.prod_list_wrap) 박스가 완전히 렌더링 될 때까지 최대 15초 대기 조치 유지
                 try:
                     await page.wait_for_selector(".prod_list_wrap", timeout=15000)
                     print("   ↳ 📦 상품 목록 레이아웃 감지 성공. 스크롤을 시작합니다.")
