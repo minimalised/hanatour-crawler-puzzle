@@ -11,14 +11,15 @@ from playwright.async_api import async_playwright
 from openai import AsyncOpenAI
 
 # 1. OpenAI 비동기 클라이언트 초기화
-# GitHub Actions 환경에서는 Repository Secrets에 등록된 OPENAI_API_KEY를 자동으로 읽어옵니다.
 openai_client = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY", "YOUR_LOCAL_API_KEY"))
 
 async def generate_naver_titles_llm(data):
     """
     GPT-4o-mini를 활용하여 네이버 쇼핑 가이드에 맞춘 고정된 상품명 3개를 생성합니다.
-    temperature=0과 seed 고정으로 인풋이 같으면 아웃풋도 항상 완전히 동일합니다.
     """
+    # 💡 출발공항 정보가 있으면 문구에 추가하고, '없음'이면 제외하여 프롬프트 최적화
+    departure_context = f"- 지정 출발공항: {data['departure_airport']}" if data['departure_airport'] != "없음" else "- 지정 출발공항: 정보 없음 (기본 출발지 가이드 적용)"
+
     prompt = f"""
 당신은 네이버 쇼핑 검색 최적화(SEO) 기준에 맞춰 여행 상품명을 정제하고 재창조하는 마케팅 자동화 전문가입니다.
 제공된 정형 데이터를 바탕으로 가이드라인을 완벽히 준수하는 새로운 상품명 3개를 생성하세요.
@@ -27,6 +28,7 @@ async def generate_naver_titles_llm(data):
 - 기준 상품명: {data['pure_title']}
 - 여행 지역: {data['region']}
 - 기간: {data['duration']}
+{departure_context}
 - 핵심 설명: {data['description']}
 - 추출 키워드: {data['hashtags']}
 
@@ -34,7 +36,7 @@ async def generate_naver_titles_llm(data):
 1. 글자 수: 공백 포함 최소 25자 ~ 최대 35자 사이로 구성한다. (40자 절대 초과 금지)
 2. 중복 제거: 상품명 내부에서 동일한 단어(ex: 방콕, 여행, 패키지 등)가 2회 이상 중복 나열되는 것을 절대 금지한다.
 3. 정제성: '신상품', '세이브', '특가', '대박', '★' 같은 홍보성 문구나 특수문자는 절대 포함하지 않는다.
-4. 필수 요소: [지역명], [여행기간], [핵심 셀링포인트 1~2개]의 단어 조합이어야 한다.
+4. 필수 요소: [지정 출발공항]이 존재할 경우 반드시 상품명 맨 앞에 배치하고, [지역명], [여행기간], [핵심 셀링포인트 1~2개]의 단어 조합이어야 한다.
 5. 포맷: 문장이 아닌 명사형 키워드의 깔끔한 띄어쓰기 조합으로 구성한다.
 
 반드시 아래 JSON 포맷으로만 응답하세요. 다른 설명은 생략합니다.
@@ -52,8 +54,8 @@ async def generate_naver_titles_llm(data):
                 {"role": "user", "content": prompt}
             ],
             response_format={"type": "json_object"},
-            temperature=0,  # 결정론적 결과 고정을 위해 무작위성 0 세팅
-            seed=42         # 시드 고정
+            temperature=0,
+            seed=42
         )
         
         result_json = json.loads(response.choices[0].message.content)
@@ -69,7 +71,7 @@ async def generate_naver_titles_llm(data):
 
 async def run_crawler():
     print("🌐 구글 API 인증 및 스프레드시트 연결 중...")
-    scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+    scopes = ["https://www.googleapis.com/auth/sheets", "https://www.googleapis.com/auth/drive"]
     
     json_raw = os.environ.get("GOOGLE_JSON_RAW")
     
@@ -85,17 +87,36 @@ async def run_crawler():
         print(f"❌ 구글 API 인증 실패: {auth_error}")
         return
 
-    # ------------------ URL 로드부 ------------------
-    print("🌐 스프레드시트에서 URL 리스트를 불러오는 중...")
+    # ------------------ URL 및 메타데이터 로드부 ------------------
+    print("🌐 스프레드시트에서 URL, 지역, 출발공항 리스트를 불러오는 중...")
     source_spreadsheet_id = "1mH51VHs4y0FgClkUBvZgw7oY3Yv7gQBA_a3um9uhX0I"
     try:
         source_doc = gc.open_by_key(source_spreadsheet_id)
         source_sheet = source_doc.worksheet("상품리스트")
-        raw_urls = source_sheet.col_values(1)
-        url_list = [url for url in raw_urls if url.startswith("http")]
-        print(f"✅ 총 {len(url_list)}개의 URL을 확보했습니다.")
+        
+        # 💡 A, B, C열을 한 번에 가져와 데이터 정렬 구조 확립 (A1:C 범위)
+        all_rows = source_sheet.get_all_values()
+        header = all_rows[0]
+        data_rows = all_rows[1:]  # 헤더 제외한 데이터만 추출
+        
+        target_tasks = []
+        for row in data_rows:
+            if len(row) >= 1 and row[0].startswith("http"):
+                url = row[0].strip()
+                # 💡 B열 지역명이 없으면 "지역명 미상" 처리
+                region = row[1].strip() if len(row) > 1 and row[1].strip() else "지역명 미상"
+                # 💡 C열 출발공항이 없거나 공백이면 "없음" 처리
+                airport = row[2].strip() if len(row) > 2 and row[2].strip() else "없음"
+                
+                target_tasks.append({
+                    "url": url,
+                    "sheet_region": region,
+                    "sheet_airport": airport
+                })
+                
+        print(f"✅ 총 {len(target_tasks)}개의 유효 타겟 상품 라인을 확보했습니다.")
     except Exception as e:
-        print(f"❌ URL 리스트를 가져오는 중 에러 발생: {e}")
+        print(f"❌ URL 리스트를 가공하는 중 에러 발생: {e}")
         return
 
     # ------------------ 크롤링 및 LLM 변환 실행부 ------------------
@@ -109,7 +130,11 @@ async def run_crawler():
 
         all_products = []
 
-        for current_url in url_list:
+        for task in target_tasks:
+            current_url = task["url"]
+            target_region = task["sheet_region"]
+            target_airport = task["sheet_airport"]
+            
             try:
                 await page.goto(current_url, wait_until="domcontentloaded", timeout=60000)
                 await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
@@ -129,7 +154,7 @@ async def run_crawler():
                             title_el = await main_info.query_selector(".item_title")
                             full_title = (await title_el.inner_text()).strip() if title_el else "제목 없음"
 
-                            # 2. 가변형 접두어([신상품] 등) 제거 및 타이틀 해시태그 분리
+                            # 2. 가변형 접두어 제거 및 타이틀 해시태그 분리
                             pure_title_body = re.sub(r'\[.*?\]', '', full_title).strip()
                             
                             if "#" in pure_title_body:
@@ -143,24 +168,18 @@ async def run_crawler():
                             # 3. 하단 UI 해시태그 그룹 추가 수집
                             hash_span_els = await main_info.query_selector_all(".hash_group span")
                             ui_hashtags = [(await h.inner_text()).replace("#", "").strip() for h in hash_span_els]
-                            
-                            # 데이터 정렬을 통해 무작위성 완전 차단
                             all_hashtags = sorted(list(set(title_hashtags + ui_hashtags)))
 
                             # 4. 본문 요약 설명 추출
                             desc_el = await main_info.query_selector(".item_text.stit")
                             product_desc = (await desc_el.inner_text()).strip() if desc_el else ""
 
-                            # 5. 정확한 위치 정보 추출
-                            region_el = await main_info.query_selector("span.icn.pos")
-                            region_name = (await region_el.inner_text()).strip() if region_el else "지역명 미상"
-
-                            # 6. 정확한 여행 기간 추출
+                            # 5. 정확한 여행 기간 추출
                             duration_el = await main_info.query_selector("span.icn.cal")
                             duration_text = (await duration_el.inner_text()).strip() if duration_el else ""
                             duration = duration_text.replace("여행기간", "").strip()
 
-                            # 7. 가격 및 기타 메타데이터 추출
+                            # 6. 가격 및 기타 메타데이터 추출
                             price_el = await main_info.query_selector(".price")
                             price_raw = await price_el.inner_text() if price_el else "0"
                             price = "".join(filter(str.isdigit, price_raw))
@@ -171,14 +190,14 @@ async def run_crawler():
                                 img_url = "https:" + img_url
 
                             product_id = hashlib.md5(pure_title.encode()).hexdigest()[:8]
-                            final_url = f"{current_url}"
 
                             # -------------------------------------------------------------
-                            # 💥 [핵심] 정제된 데이터를 묶어 LLM(GPT) 호출 및 상품명 3개 확보
+                            # 💥 [구조 최적화] 시트에서 매칭한 지역과 출발공항을 LLM 연동 딕셔너리에 주입
                             # -------------------------------------------------------------
                             ai_input_data = {
                                 "pure_title": pure_title,
-                                "region": region_name,
+                                "region": target_region,          # 💡 시트 B열에서 수집된 지역명
+                                "departure_airport": target_airport, # 💡 시트 C열에서 수집된 출발공항
                                 "duration": duration,
                                 "description": product_desc,
                                 "hashtags": ", ".join(all_hashtags)
@@ -186,19 +205,20 @@ async def run_crawler():
                             t1, t2, t3 = await generate_naver_titles_llm(ai_input_data)
                             # -------------------------------------------------------------
 
+                            # 💡 요구사항에 맞춘 시트 적재 필드 데이터 레이아웃 세팅
                             all_products.append({
                                 "ID": product_id,
-                                "상품명": pure_title,  # 마케팅 수식어가 빠진 깔끔한 원본
+                                "상품명": pure_title,
                                 "가격": int(price) if price else 0,
-                                "URL": final_url,
+                                "URL": current_url,
                                 "이미지URL": img_url,
-                                "지역": region_name,
+                                "지정지역": target_region,
+                                "출발공항": target_airport,
                                 "네이버_상품명_1": t1,
                                 "네이버_상품명_2": t2,
                                 "네이버_상품명_3": t3
                             })
                             
-                            # API 분당 호출 제한 방지 버퍼
                             await asyncio.sleep(0.2)
 
                         except Exception as e:
@@ -207,7 +227,7 @@ async def run_crawler():
                 except Exception as e:
                     print(f"파싱 리스트 획득 에러: {e}")
 
-                print(f"✅ {region_name} 완료 ({len(all_products)}개 누적)")
+                print(f"✅ {target_region} (출발지: {target_airport}) 완료 ({len(all_products)}개 누적)")
                 await asyncio.sleep(1)
 
             except Exception as e:
@@ -227,8 +247,8 @@ async def run_crawler():
 
             try:
                 df = pd.DataFrame(all_products)
-                # 새로운 상품명 칼럼 3개를 포함하도록 업그레이드된 구조 지정
-                column_order = ["ID", "상품명", "가격", "URL", "이미지URL", "지역", "네이버_상품명_1", "네이버_상품명_2", "네이버_상품명_3"]
+                # 💡 요구사항에 맞춰 수정한 적재 필드 순서 배치 (지정지역, 출발공항 분리 보관)
+                column_order = ["ID", "상품명", "가격", "URL", "이미지URL", "지정지역", "출발공항", "네이버_상품명_1", "네이버_상품명_2", "네이버_상품명_3"]
                 df = df[column_order]
                 data_to_upload = [df.columns.values.tolist()] + df.values.tolist()
 
