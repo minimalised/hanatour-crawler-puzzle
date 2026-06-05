@@ -9,6 +9,8 @@ import gspread
 from google.oauth2.service_account import Credentials
 from playwright.async_api import async_playwright
 from openai import AsyncOpenAI
+# 💡 봇 우회를 위한 stealth 패키지 로드
+from playwright_stealth import stealth_async
 
 # 1. OpenAI 비동기 클라이언트 초기화
 openai_client = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY", "YOUR_LOCAL_API_KEY"))
@@ -123,6 +125,9 @@ async def run_crawler():
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
         )
         page = await context.new_page()
+        
+        # 💡 [교정 1] 브라우저 백엔드에 사람처럼 행동하는 스텔스 모드 주입 (봇 방화벽 우회)
+        await stealth_async(page)
 
         all_products = []
 
@@ -133,27 +138,33 @@ async def run_crawler():
             
             try:
                 print(f"🔄 {target_region} (출발: {target_airport}) 페이지 로딩 중...")
-                await page.goto(current_url, wait_until="domcontentloaded", timeout=60000)
+                # 💡 페이지 로딩 조건을 무조건 다 받아올 때까지 기다리는 'networkidle'로 변경
+                await page.goto(current_url, wait_until="networkidle", timeout=60000)
                 
+                # 💡 [교정 2] 상품 리스트(.prod_list_wrap) 박스가 완전히 뜰 때까지 최대 15초 강제 대기
+                # 빈 화면인 상태에서 바로 스크롤 로직으로 넘어가 0개 감지되는 현상 전면 차단
+                try:
+                    await page.wait_for_selector(".prod_list_wrap", timeout=15000)
+                    print("   ↳ 📦 상품 목록 레이아웃 감지 성공. 스크롤을 시작합니다.")
+                except Exception as layout_error:
+                    print(f"   ⚠️ 상품 목록 레이아웃을 찾지 못했습니다 (차단 혹은 비어있음): {layout_error}")
+                    continue
+
                 # ====================================================================
                 # 💥 [고도화] 200개 이상 대량 지연 로딩 상품을 위한 무한 스크롤 루프
                 # ====================================================================
                 print("⏳ 대량 인피니트 스크롤 동적 데이터 로딩을 시작합니다...")
                 last_height = await page.evaluate("document.body.scrollHeight")
                 scroll_count = 0
-                max_scrolls = 40  # 20개씩 40번 = 최대 800개 방어선 세팅
+                max_scrolls = 40  
 
                 while scroll_count < max_scrolls:
-                    # 브라우저 스크롤을 맨 아래로 하강
                     await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                    # 비동기 네트워크 소켓 및 이미지 렌더링 대기 버퍼 증가 (대량 페이지용 2.5초)
                     await asyncio.sleep(2.5)
                     
                     new_height = await page.evaluate("document.body.scrollHeight")
                     
-                    # 스크롤 전후의 높이가 같다면 데이터 소진으로 판단
                     if new_height == last_height:
-                        # 페이지 레이아웃 지연 렌더링 방지를 위해 더블 체크 메커니즘 가동
                         await page.evaluate("window.scrollTo(0, document.body.scrollHeight - 600)")
                         await asyncio.sleep(1.0)
                         await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
@@ -169,7 +180,6 @@ async def run_crawler():
                 # ====================================================================
 
                 try:
-                    # 완벽하게 확보된 리스트 배열 전체를 바인딩
                     final_items = await page.query_selector_all(".prod_list_wrap ul.type > li")
                     print(f"📦 최종 타겟 엘리먼트 {len(final_items)}개 감지. 데이터 전처리 및 LLM 치환 시작...")
                     
@@ -222,9 +232,6 @@ async def run_crawler():
 
                             product_id = hashlib.md5(pure_title.encode()).hexdigest()[:8]
                             
-                            # -------------------------------------------------------------
-                            # API 트래픽 부하 방지를 위한 필수 데이터 스키마 가공
-                            # -------------------------------------------------------------
                             ai_input_data = {
                                 "pure_title": pure_title,
                                 "region": target_region,          
@@ -248,7 +255,6 @@ async def run_crawler():
                                 "네이버_상품명_3": t3
                             })
                             
-                            # 💡 200개 이상 대량 루프 돌 때 OpenAI RPM(분당 요청수) 제한 터짐 방지 버퍼 확장 (0.5초)
                             await asyncio.sleep(0.5)
 
                         except Exception as e:
