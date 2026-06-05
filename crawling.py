@@ -17,7 +17,6 @@ async def generate_naver_titles_llm(data):
     """
     GPT-4o-mini를 활용하여 네이버 쇼핑 가이드에 맞춘 고정된 상품명 3개를 생성합니다.
     """
-    # 💡 출발공항 정보가 있으면 문구에 추가하고, '없음'이면 제외하여 프롬프트 최적화
     departure_context = f"- 지정 출발공항: {data['departure_airport']}" if data['departure_airport'] != "없음" else "- 지정 출발공항: 정보 없음 (기본 출발지 가이드 적용)"
 
     prompt = f"""
@@ -94,18 +93,15 @@ async def run_crawler():
         source_doc = gc.open_by_key(source_spreadsheet_id)
         source_sheet = source_doc.worksheet("상품리스트")
         
-        # 💡 A, B, C열을 한 번에 가져와 데이터 정렬 구조 확립 (A1:C 범위)
         all_rows = source_sheet.get_all_values()
         header = all_rows[0]
-        data_rows = all_rows[1:]  # 헤더 제외한 데이터만 추출
+        data_rows = all_rows[1:]
         
         target_tasks = []
         for row in data_rows:
             if len(row) >= 1 and row[0].startswith("http"):
                 url = row[0].strip()
-                # 💡 B열 지역명이 없으면 "지역명 미상" 처리
                 region = row[1].strip() if len(row) > 1 and row[1].strip() else "지역명 미상"
-                # 💡 C열 출발공항이 없거나 공백이면 "없음" 처리
                 airport = row[2].strip() if len(row) > 2 and row[2].strip() else "없음"
                 
                 target_tasks.append({
@@ -136,12 +132,47 @@ async def run_crawler():
             target_airport = task["sheet_airport"]
             
             try:
+                print(f"🔄 {target_region} (출발: {target_airport}) 페이지 로딩 중...")
                 await page.goto(current_url, wait_until="domcontentloaded", timeout=60000)
-                await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                await asyncio.sleep(2)
+                
+                # ====================================================================
+                # 💥 [고도화] 200개 이상 대량 지연 로딩 상품을 위한 무한 스크롤 루프
+                # ====================================================================
+                print("⏳ 대량 인피니트 스크롤 동적 데이터 로딩을 시작합니다...")
+                last_height = await page.evaluate("document.body.scrollHeight")
+                scroll_count = 0
+                max_scrolls = 40  # 20개씩 40번 = 최대 800개 방어선 세팅
+
+                while scroll_count < max_scrolls:
+                    # 브라우저 스크롤을 맨 아래로 하강
+                    await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                    # 비동기 네트워크 소켓 및 이미지 렌더링 대기 버퍼 증가 (대량 페이지용 2.5초)
+                    await asyncio.sleep(2.5)
+                    
+                    new_height = await page.evaluate("document.body.scrollHeight")
+                    
+                    # 스크롤 전후의 높이가 같다면 데이터 소진으로 판단
+                    if new_height == last_height:
+                        # 페이지 레이아웃 지연 렌더링 방지를 위해 더블 체크 메커니즘 가동
+                        await page.evaluate("window.scrollTo(0, document.body.scrollHeight - 600)")
+                        await asyncio.sleep(1.0)
+                        await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                        
+                        if new_height == await page.evaluate("document.body.scrollHeight"):
+                            print("   ↳ ✅ 해당 페이지의 모든 상품 로딩을 완료했습니다.")
+                            break
+                            
+                    last_height = new_height
+                    scroll_count += 1
+                    if scroll_count % 5 == 0:
+                        print(f"   .. 현재 {scroll_count}회차 스크롤 다운 수행 중 ..")
+                # ====================================================================
 
                 try:
+                    # 완벽하게 확보된 리스트 배열 전체를 바인딩
                     final_items = await page.query_selector_all(".prod_list_wrap ul.type > li")
+                    print(f"📦 최종 타겟 엘리먼트 {len(final_items)}개 감지. 데이터 전처리 및 LLM 치환 시작...")
+                    
                     for item in final_items:
                         try:
                             main_info = await item.query_selector(":scope > .inr.right")
@@ -190,22 +221,20 @@ async def run_crawler():
                                 img_url = "https:" + img_url
 
                             product_id = hashlib.md5(pure_title.encode()).hexdigest()[:8]
-
+                            
                             # -------------------------------------------------------------
-                            # 💥 [구조 최적화] 시트에서 매칭한 지역과 출발공항을 LLM 연동 딕셔너리에 주입
+                            # API 트래픽 부하 방지를 위한 필수 데이터 스키마 가공
                             # -------------------------------------------------------------
                             ai_input_data = {
                                 "pure_title": pure_title,
-                                "region": target_region,          # 💡 시트 B열에서 수집된 지역명
-                                "departure_airport": target_airport, # 💡 시트 C열에서 수집된 출발공항
+                                "region": target_region,          
+                                "departure_airport": target_airport, 
                                 "duration": duration,
                                 "description": product_desc,
                                 "hashtags": ", ".join(all_hashtags)
                             }
                             t1, t2, t3 = await generate_naver_titles_llm(ai_input_data)
-                            # -------------------------------------------------------------
 
-                            # 💡 요구사항에 맞춘 시트 적재 필드 데이터 레이아웃 세팅
                             all_products.append({
                                 "ID": product_id,
                                 "상품명": pure_title,
@@ -219,7 +248,8 @@ async def run_crawler():
                                 "네이버_상품명_3": t3
                             })
                             
-                            await asyncio.sleep(0.2)
+                            # 💡 200개 이상 대량 루프 돌 때 OpenAI RPM(분당 요청수) 제한 터짐 방지 버퍼 확장 (0.5초)
+                            await asyncio.sleep(0.5)
 
                         except Exception as e:
                             print(f"개별 상품 파싱 에러: {e}")
@@ -227,7 +257,7 @@ async def run_crawler():
                 except Exception as e:
                     print(f"파싱 리스트 획득 에러: {e}")
 
-                print(f"✅ {target_region} (출발지: {target_airport}) 완료 ({len(all_products)}개 누적)")
+                print(f"✅ {target_region} (출발지: {target_airport}) 완료 ({len(all_products)}개 누적 완료)")
                 await asyncio.sleep(1)
 
             except Exception as e:
@@ -247,7 +277,6 @@ async def run_crawler():
 
             try:
                 df = pd.DataFrame(all_products)
-                # 💡 요구사항에 맞춰 수정한 적재 필드 순서 배치 (지정지역, 출발공항 분리 보관)
                 column_order = ["ID", "상품명", "가격", "URL", "이미지URL", "지정지역", "출발공항", "네이버_상품명_1", "네이버_상품명_2", "네이버_상품명_3"]
                 df = df[column_order]
                 data_to_upload = [df.columns.values.tolist()] + df.values.tolist()
