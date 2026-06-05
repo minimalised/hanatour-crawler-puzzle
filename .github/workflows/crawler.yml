@@ -33,4 +33,3 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           python -u crawling.py
-          python -u crawling_hotel.py
