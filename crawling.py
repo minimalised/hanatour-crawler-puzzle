@@ -68,9 +68,9 @@ async def generate_naver_titles_llm(data):
         return f"[Error] {data['pure_title']}", f"[Error] {data['region']}", f"[Error] {data['pure_title']}"
 
 
-async def process_single_product(item, target_region, target_airport, current_url):
+async def process_single_product(item, target_region, target_airport, current_url, existing_titles_dict):
     """
-    개별 상품 정보를 추출하고 GPT-4o-mini 변환까지 비동기 태스크로 처리합니다.
+    개별 상품 정보를 추출하고, 기존에 생성된 적이 없는 '신규 상품'일 때만 GPT-4o-mini 연산을 수행합니다.
     """
     try:
         main_info = await item.query_selector(":scope > .inr.right")
@@ -82,6 +82,9 @@ async def process_single_product(item, target_region, target_airport, current_ur
         # 1. 원본 풀 타이틀 가져오기
         title_el = await main_info.query_selector(".item_title")
         full_title = (await title_el.inner_text()).strip() if title_el else "제목 없음"
+
+        # 💡 [핵심 교정] ID 생성 위치를 최상단으로 이동 (대조용)
+        product_id = hashlib.md5(full_title.encode()).hexdigest()[:8]
 
         # 2. 가변형 접두어 제거 및 타이틀 해시태그 분리 (정제 상품명용)
         pure_title_body = re.sub(r'\[.*?\]', '', full_title).strip()
@@ -108,31 +111,52 @@ async def process_single_product(item, target_region, target_airport, current_ur
         duration_text = (await duration_el.inner_text()).strip() if duration_el else ""
         duration = duration_text.replace("여행기간", "").strip()
 
-        # 6. 가격 및 기타 메타데이터 추출
+        # 6. 가격 추출 (숫자만 남기기)
         price_el = await main_info.query_selector(".price")
         price_raw = await price_el.inner_text() if price_el else "0"
         price = "".join(filter(str.isdigit, price_raw))
 
+        # 7. 이미지 URL 추출 (bg_alpha 기지연 로딩 방어벽 적용)
+        img_url = ""
         img_el = await img_check.query_selector("img")
-        img_url = await img_el.get_attribute("src") if img_el else ""
+        if img_el:
+            data_src = await img_el.get_attribute("data-src")
+            src = await img_el.get_attribute("src")
+            potential_url = data_src if data_src else src
+            
+            if potential_url and "bg_alpha" not in potential_url:
+                img_url = potential_url.strip()
+            else:
+                all_imgs = await img_check.query_selector_all("img")
+                for im in all_imgs:
+                    i_src = await im.get_attribute("src")
+                    i_data = await im.get_attribute("data-src")
+                    target = i_data if i_data else i_src
+                    if target and "bg_alpha" not in target:
+                        img_url = target.strip()
+                        break
+
         if img_url and img_url.startswith("//"): 
             img_url = "https:" + img_url
 
-        # 💡 [핵심 교정] ID 중복 근절: 글자 하나만 달라도 유일값이 나오도록 'full_title(원본명)' 기준으로 해시 아이디를 생성합니다.
-        product_id = hashlib.md5(full_title.encode()).hexdigest()[:8]
-        
-        ai_input_data = {
-            "pure_title": pure_title,
-            "region": target_region,          
-            "departure_airport": target_airport, 
-            "duration": duration,
-            "description": product_desc,
-            "hashtags": ", ".join(all_hashtags)
-        }
-        
-        t1, t2, t3 = await generate_naver_titles_llm(ai_input_data)
+        # 💡 [비용 최적화 가드레일] 기존 구글 시트에 이미 존재하는 ID인지 대조합니다.
+        if product_id in existing_titles_dict:
+            # 이미 등록된 상품이라면 LLM을 호출하지 않고, 기존에 만들어둔 타이틀 3개를 그대로 재사용합니다.
+            # 단, 가격이나 이미지URL, 지정지역 등은 오늘 크롤링한 최신 정보로 업데이트됩니다.
+            t1, t2, t3 = existing_titles_dict[product_id]
+        else:
+            # 시트에 없는 완전한 신규 상품일 때만 OpenAI API 호출 (돈 아끼는 핵심 로직)
+            print(f"✨ [신규 상품 발견] LLM 타이틀 생성 중: {pure_title}")
+            ai_input_data = {
+                "pure_title": pure_title,
+                "region": target_region,          
+                "departure_airport": target_airport, 
+                "duration": duration,
+                "description": product_desc,
+                "hashtags": ", ".join(all_hashtags)
+            }
+            t1, t2, t3 = await generate_naver_titles_llm(ai_input_data)
 
-        # 💡 원본상품명과 정제상품명을 명확히 분리하여 데이터 구조를 확장합니다.
         return {
             "ID": product_id,
             "원본상품명": full_title,
@@ -198,6 +222,25 @@ async def run_crawler():
         print(f"❌ URL 리스트를 가공하는 중 에러 발생: {e}")
         return
 
+    # 💡 [비용 최적화 준비] 첫 번째 타겟 구글 시트에서 기존에 수집했던 네이버 상품명 대조군 로드
+    existing_titles_dict = {}
+    try:
+        print("📥 캐싱용 기존 시트 데이터 파싱 중...")
+        github_sheet = source_doc.worksheet("github")
+        existing_data = github_sheet.get_all_records() # 컬럼명을 Key로 갖는 딕셔너리 리스트 반환
+        
+        for r in existing_data:
+            if r.get("ID"):
+                # ID를 Key로 잡고, 기존에 뽑아둔 네이버 상품명 3개를 튜플로 밸류에 저장
+                existing_titles_dict[str(r["ID"])] = (
+                    r.get("네이버_상품명_1", ""),
+                    r.get("네이버_상품명_2", ""),
+                    r.get("네이버_상품명_3", "")
+                )
+        print(f"✅ 기수집된 기존 상품 {len(existing_titles_dict)}개를 메모리에 캐싱했습니다. (중복 호출 방지 활성화)")
+    except Exception as cache_error:
+        print(f"⚠️ 기존 시트 로드 실패(첫 실행이거나 시트가 비었음). 전수 LLM 생성 모드로 진행합니다. 원인: {cache_error}")
+
     # ------------------ 크롤링 및 LLM 변환 실행부 ------------------
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
@@ -253,10 +296,11 @@ async def run_crawler():
                 await asyncio.sleep(1.0)
 
                 final_items = await page.query_selector_all(".prod_list_wrap ul.type > li")
-                print(f"📦 [확인] 최종 수집된 타겟 엘리먼트 총 {len(final_items)}개! 대량 일괄 병렬 LLM 연산을 실행합니다.")
+                print(f"📦 [확인] 최종 수집된 타겟 엘리먼트 총 {len(final_items)}개! 조건부 병렬 처리를 시작합니다.")
                 
+                # 💡 process_single_product 호출 시 캐싱 딕셔너리(existing_titles_dict)를 함께 넘겨줍니다.
                 tasks = [
-                    process_single_product(item, target_region, target_airport, current_url) 
+                    process_single_product(item, target_region, target_airport, current_url, existing_titles_dict) 
                     for item in final_items
                 ]
                 
@@ -286,7 +330,6 @@ async def run_crawler():
 
             try:
                 df = pd.DataFrame(all_products)
-                # 💡 [스키마 업데이트] 원본상품명과 정제상품명을 순서대로 시트에 배치하도록 재정의합니다.
                 column_order = ["ID", "원본상품명", "정제상품명", "가격", "URL", "이미지URL", "지정지역", "출발공항", "네이버_상품명_1", "네이버_상품명_2", "네이버_상품명_3"]
                 df = df[column_order]
                 data_to_upload = [df.columns.values.tolist()] + df.values.tolist()
