@@ -17,7 +17,11 @@ async def generate_naver_titles_llm(data):
     """
     GPT-4o-mini를 활용하여 네이버 쇼핑 가이드에 맞춘 고정된 상품명 3개를 생성합니다.
     """
-    departure_context = f"- 지정 출발공항: {data['departure_airport']}" if data['departure_airport'] != "없음" else "- 지정 출발공항: 정보 없음 (기본 출발지 가이드 적용)"
+    # 💡 출발지 정보가 없을 때 임의의 접두어([기본출발] 등) 생성 행위를 완벽하게 차단합니다.
+    if data['departure_airport'] != "없음":
+        departure_context = f"- 지정 출발공항: {data['departure_airport']} (반드시 상품명 맨 앞에 '{data['departure_airport']}' 형식으로 고정 배치할 것)"
+    else:
+        departure_context = "- 지정 출발공항: 없음 (★주의: 상품명 맨 앞에 '[기본출발]', '[기본출발지]', '[출발지없음]' 등 어떠한 출발 관련 문구도 절대 넣지 말고, 곧바로 '지역명'부터 시작할 것)"
 
     prompt = f"""
 당신은 네이버 쇼핑 검색 최적화(SEO) 기준에 맞춰 여행 상품명을 정제하고 재창조하는 마케팅 자동화 전문가입니다.
@@ -35,14 +39,16 @@ async def generate_naver_titles_llm(data):
 1. 글자 수: 공백 포함 최소 25자 ~ 최대 35자 사이로 구성한다. (40자 절대 초과 금지)
 2. 중복 제거: 상품명 내부에서 동일한 단어(ex: 방콕, 여행, 패키지 등)가 2회 이상 중복 나열되는 것을 절대 금지한다.
 3. 정제성: '신상품', '세이브', '특가', '대박', '★' 같은 홍보성 문구나 특수문자는 절대 포함하지 않는다.
-4. 필수 요소: [지정 출발공항]이 존재할 경우 반드시 상품명 맨 앞에 배치하고, [지역명], [여행기간], [핵심 셀링포인트 1~2개]의 단어 조합이어야 한다.
+4. 출발지 조건 규칙: 
+   - [지정 출발공항]이 존재할 경우: 반드시 상품명 맨 앞에 대괄호 형태로 배치한다. (예: [대구출발], [부산출발])
+   - [지정 출발공항]이 '없음'일 경우: '기본출발', '전국출발' 같은 문구를 임의로 조작해서 넣지 말고 **무조건 곧바로 지역명/브랜드명으로 상품명을 시작**한다.
 5. 포맷: 문장이 아닌 명사형 키워드의 깔끔한 띄어쓰기 조합으로 구성한다.
 
 반드시 아래 JSON 포맷으로만 응답하세요. 다른 설명은 생략합니다.
 {{
-  "option_1": "[대구출발] 방콕 파타야 5일 5성호텔 패키지",
-  "option_2": "방콕 파타야 여행 5일 노옵션 디너크루즈",
-  "option_3": "가족휴양 추천 방콕 파타야 5일 타이마사지"
+  "option_1": "남해안 일주 4일 가족여행 고품격 효도 패키지",
+  "option_2": "제주도 3일 특급호텔 식도락 여행 추천",
+  "option_3": "강원도 여행 3일 가족휴양 고품격 숙소 별미"
 }}
 """
     try:
@@ -68,9 +74,9 @@ async def generate_naver_titles_llm(data):
         return f"[Error] {data['pure_title']}", f"[Error] {data['region']}", f"[Error] {data['pure_title']}"
 
 
-async def process_single_product(item, target_region, target_airport, current_url, existing_titles_dict):
+async def process_single_product(item, target_region, target_airport, current_url, existing_titles_dict, runtime_titles_dict):
     """
-    개별 상품 정보를 추출하고, 기존에 생성된 적이 없는 '신규 상품'일 때만 GPT-4o-mini 연산을 수행합니다.
+    개별 상품 정보를 추출하고 고유 ID 대조 및 실시간 런타임 캐싱 검증을 거쳐 최소한의 LLM 연산만 수행합니다.
     """
     try:
         main_info = await item.query_selector(":scope > .inr.right")
@@ -83,10 +89,16 @@ async def process_single_product(item, target_region, target_airport, current_ur
         title_el = await main_info.query_selector(".item_title")
         full_title = (await title_el.inner_text()).strip() if title_el else "제목 없음"
 
-        # 💡 [핵심 교정] ID 생성 위치를 최상단으로 이동 (대조용)
-        product_id = hashlib.md5(full_title.encode()).hexdigest()[:8]
+        # 2. 가격 먼저 추출 (ID 생성에 결합하기 위해 순서 조정)
+        price_el = await main_info.query_selector(".price")
+        price_raw = await price_el.inner_text() if price_el else "0"
+        price = "".join(filter(str.isdigit, price_raw))
 
-        # 2. 가변형 접두어 제거 및 타이틀 해시태그 분리 (정제 상품명용)
+        # 💡 [ID 고유화] 상품명 + 가격 조합으로 유일한 해시 ID를 생성하여 중복 타이틀의 무결성 확보
+        unique_str = f"{full_title}_{price}"
+        product_id = hashlib.md5(unique_str.encode()).hexdigest()[:8]
+
+        # 3. 가변형 접두어 제거 및 타이틀 해시태그 분리 (정제 상품명용)
         pure_title_body = re.sub(r'\[.*?\]', '', full_title).strip()
         
         if "#" in pure_title_body:
@@ -97,26 +109,21 @@ async def process_single_product(item, target_region, target_airport, current_ur
             pure_title = pure_title_body
             title_hashtags = []
 
-        # 3. 하단 UI 해시태그 그룹 추가 수집
+        # 4. 하단 UI 해시태그 그룹 추가 수집
         hash_span_els = await main_info.query_selector_all(".hash_group span")
         ui_hashtags = [(await h.inner_text()).replace("#", "").strip() for h in hash_span_els]
         all_hashtags = sorted(list(set(title_hashtags + ui_hashtags)))
 
-        # 4. 본문 요약 설명 추출
+        # 5. 본문 요약 설명 추출
         desc_el = await main_info.query_selector(".item_text.stit")
         product_desc = (await desc_el.inner_text()).strip() if desc_el else ""
 
-        # 5. 정확한 여행 기간 추출
+        # 6. 정확한 여행 기간 추출
         duration_el = await main_info.query_selector("span.icn.cal")
         duration_text = (await duration_el.inner_text()).strip() if duration_el else ""
         duration = duration_text.replace("여행기간", "").strip()
 
-        # 6. 가격 추출 (숫자만 남기기)
-        price_el = await main_info.query_selector(".price")
-        price_raw = await price_el.inner_text() if price_el else "0"
-        price = "".join(filter(str.isdigit, price_raw))
-
-        # 7. 이미지 URL 추출 (bg_alpha 기지연 로딩 방어벽 적용)
+        # 7. 이미지 URL 추출 (bg_alpha 기지연 로딩 방어벽 완벽 적용)
         img_url = ""
         img_el = await img_check.query_selector("img")
         if img_el:
@@ -139,14 +146,17 @@ async def process_single_product(item, target_region, target_airport, current_ur
         if img_url and img_url.startswith("//"): 
             img_url = "https:" + img_url
 
-        # 💡 [비용 최적화 가드레일] 기존 구글 시트에 이미 존재하는 ID인지 대조합니다.
+        # 💡 [비용 최적화 2중 가드레일 구조]
         if product_id in existing_titles_dict:
-            # 이미 등록된 상품이라면 LLM을 호출하지 않고, 기존에 만들어둔 타이틀 3개를 그대로 재사용합니다.
-            # 단, 가격이나 이미지URL, 지정지역 등은 오늘 크롤링한 최신 정보로 업데이트됩니다.
+            # 1계층: 구글 시트에 이미 등록된 완전 동일 상품(ID 기준)인 경우 기존 타이틀 그대로 재사용 (비용 0원)
             t1, t2, t3 = existing_titles_dict[product_id]
+        elif pure_title in runtime_titles_dict:
+            # 2계층: 시트에는 없지만 '이번 실행 회차' 내에서 이미 동일한 기본 정제명을 처리한 대안 상품인 경우 결과 복사 (비용 0원 방어)
+            t1, t2, t3 = runtime_titles_dict[pure_title]
+            print(f"♻️ [비용 절감] 동일 회차 내 기본형 상품명 캐시 재사용: {pure_title}")
         else:
-            # 시트에 없는 완전한 신규 상품일 때만 OpenAI API 호출 (돈 아끼는 핵심 로직)
-            print(f"✨ [신규 상품 발견] LLM 타이틀 생성 중: {pure_title}")
+            # 3계층: 전수 검증을 통과한 순수 신규 상품일 때만 딱 1번 LLM 호출
+            print(f"✨ [신규 상품 발견] LLM 타이틀 최초 생성: {pure_title}")
             ai_input_data = {
                 "pure_title": pure_title,
                 "region": target_region,          
@@ -156,6 +166,8 @@ async def process_single_product(item, target_region, target_airport, current_ur
                 "hashtags": ", ".join(all_hashtags)
             }
             t1, t2, t3 = await generate_naver_titles_llm(ai_input_data)
+            # 다른 동명이인 대안 상품들의 중복 호출을 막기 위해 런타임 캐시에 실시간 기록
+            runtime_titles_dict[pure_title] = (t1, t2, t3)
 
         return {
             "ID": product_id,
@@ -227,11 +239,10 @@ async def run_crawler():
     try:
         print("📥 캐싱용 기존 시트 데이터 파싱 중...")
         github_sheet = source_doc.worksheet("github")
-        existing_data = github_sheet.get_all_records() # 컬럼명을 Key로 갖는 딕셔너리 리스트 반환
+        existing_data = github_sheet.get_all_records()
         
         for r in existing_data:
             if r.get("ID"):
-                # ID를 Key로 잡고, 기존에 뽑아둔 네이버 상품명 3개를 튜플로 밸류에 저장
                 existing_titles_dict[str(r["ID"])] = (
                     r.get("네이버_상품명_1", ""),
                     r.get("네이버_상품명_2", ""),
@@ -240,6 +251,9 @@ async def run_crawler():
         print(f"✅ 기수집된 기존 상품 {len(existing_titles_dict)}개를 메모리에 캐싱했습니다. (중복 호출 방지 활성화)")
     except Exception as cache_error:
         print(f"⚠️ 기존 시트 로드 실패(첫 실행이거나 시트가 비었음). 전수 LLM 생성 모드로 진행합니다. 원인: {cache_error}")
+
+    # 💡 [실시간 캐시 선언] 이번 회차 루프 내에서 중복되는 대안 상품들의 LLM 정제 명칭을 임시 기억하는소
+    runtime_titles_dict = {}
 
     # ------------------ 크롤링 및 LLM 변환 실행부 ------------------
     async with async_playwright() as p:
@@ -298,9 +312,9 @@ async def run_crawler():
                 final_items = await page.query_selector_all(".prod_list_wrap ul.type > li")
                 print(f"📦 [확인] 최종 수집된 타겟 엘리먼트 총 {len(final_items)}개! 조건부 병렬 처리를 시작합니다.")
                 
-                # 💡 process_single_product 호출 시 캐싱 딕셔너리(existing_titles_dict)를 함께 넘겨줍니다.
+                # 💡 runtime_titles_dict 파라미터를 인자로 추가 전달하여 동시 실시간 중복 생성을 원천 차단합니다.
                 tasks = [
-                    process_single_product(item, target_region, target_airport, current_url, existing_titles_dict) 
+                    process_single_product(item, target_region, target_airport, current_url, existing_titles_dict, runtime_titles_dict) 
                     for item in final_items
                 ]
                 
@@ -338,7 +352,7 @@ async def run_crawler():
                     try:
                         doc = gc.open_by_key(spreadsheet_id)
                         sheet = doc.worksheet(worksheet_name)
-                        sheet.clear()
+                        sheet.clear()  # 💡 완전 자동화를 위해 기존 리스트를 싹 밀고 새로고침합니다.
                         sheet.update(values=data_to_upload, range_name='A1')
                         print(f"✅ 성공: [{doc.title}] 업데이트 완료")
                     except Exception as sheet_error:
