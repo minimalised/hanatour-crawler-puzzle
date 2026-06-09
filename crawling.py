@@ -15,7 +15,7 @@ openai_client = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY", "YOUR_LOCAL
 
 async def generate_naver_titles_llm(data):
     """
-    GPT-4o-mini를 활용하여 4가지 마케팅 콘셉트별로 3개씩, 총 12개의 상품명을 안전하게 생성합니다.
+    GPT-4o-mini를 활용하여 4가지 콘셉트별로 3개씩, 총 12개의 마케팅 최적화 상품명을 한 번에 생성합니다.
     """
     if data['departure_airport'] != "없음":
         departure_context = f"- 지정 출발공항: {data['departure_airport']} (반드시 상품명 맨 앞에 '{data['departure_airport']}' 형식으로 고정 배치할 것)"
@@ -47,7 +47,7 @@ async def generate_naver_titles_llm(data):
 ■ 콘셉트 D (감성/트렌디형 - 3개): 인스타/릴스 감성의 카피라이팅 가미. (ex: 요즘뜨는, 인생샷, 감성숙소, 여유로운, 로컬맛집 등 트렌디 단어 자연스럽게 융합)
 """
     
-    # 🌟 [철통 보안 예외 방어] GPT가 무조건 지켜야만 하는 구조 정의 (Structured Outputs)
+    # 🌟 GPT의 규격 이탈(빽틱 등 수식어 추가)을 원천 차단하는 철통 보안 스키마 정의
     json_schema_format = {
         "type": "json_schema",
         "json_schema": {
@@ -77,7 +77,7 @@ async def generate_naver_titles_llm(data):
                 {"role": "system", "content": "You are a helpful assistant that outputs compliant JSON based on the provided schema."},
                 {"role": "user", "content": prompt}
             ],
-            response_format=json_schema_format, # 규격 이탈 원천 차단
+            response_format=json_schema_format, # 🌟 스키마 강제 적용으로 JSON 파싱 에러 100% 방어
             temperature=0,
             seed=42
         )
@@ -110,12 +110,12 @@ async def process_single_product(item, target_region, target_airport, current_ur
         title_el = await main_info.query_selector(".item_title")
         full_title = (await title_el.inner_text()).strip() if title_el else "제목 없음"
 
-        # 2. 가격 추출
+        # 2. 가격 먼저 추출
         price_el = await main_info.query_selector(".price")
         price_raw = await price_el.inner_text() if price_el else "0"
         price = "".join(filter(str.isdigit, price_raw))
 
-        # ID 고유화: 상품명 + 가격 조합으로 고유 ID 생성
+        # 💡 [ID 고유화] 상품명 + 가격 조합으로 고유 ID 생성
         unique_str = f"{full_title}_{price}"
         product_id = hashlib.md5(unique_str.encode()).hexdigest()[:8]
 
@@ -167,13 +167,16 @@ async def process_single_product(item, target_region, target_airport, current_ur
         if img_url and img_url.startswith("//"): 
             img_url = "https:" + img_url
 
-        # 💡 [비용 최적화 12개 확장형 캐싱 구조]
+        # 💡 [비용 최적화 12개 캐시 확장 매핑]
         if product_id in existing_titles_dict:
+            # 1계층 구글 시트 캐시
             titles = existing_titles_dict[product_id]
         elif pure_title in runtime_titles_dict:
+            # 2계층 동 회차 메모리 캐시
             titles = runtime_titles_dict[pure_title]
             print(f"♻️ [비용 절감] 동일 회차 내 기본형 상품명 캐시 재사용: {pure_title}")
         else:
+            # 3계층 신규 호출
             print(f"✨ [신규 상품 발견] LLM 12대 타이틀 통합 최초 생성: {pure_title}")
             ai_input_data = {
                 "pure_title": pure_title,
@@ -223,13 +226,12 @@ async def run_crawler():
         print(f"❌ 구글 API 인증 실패: {auth_error}")
         return
 
-    # ------------------ 1. 소스 스프레드시트 (타겟 URL 로드) ------------------
+    # ------------------ SOURCE LOAD ------------------
     source_spreadsheet_id = os.environ.get("SOURCE_SPREADSHEET_ID")
     if not source_spreadsheet_id:
-        print("❌ SOURCE_SPREADSHEET_ID 환경 변수가 설정되지 않았습니다.")
+        print("❌ SOURCE_SPREADSHEET_ID 환경 변수가 없습니다.")
         return
         
-    print(f"📥 소스 스프레드시트 로드 중... (ID: {source_spreadsheet_id})")
     try:
         source_doc = gc.open_by_key(source_spreadsheet_id)
         source_sheet = source_doc.worksheet("상품리스트")
@@ -252,10 +254,10 @@ async def run_crawler():
                 
         print(f"✅ 총 {len(target_tasks)}개의 유효 타겟 상품 라인을 확보했습니다.")
     except Exception as e:
-        print(f"❌ 소스 URL 리스트 가공 중 에러 발생: {e}")
+        print(f"❌ URL 리스트 가공 중 에러 발생: {e}")
         return
 
-    # ------------------ 2. 타겟 스프레드시트 (기존 캐시 데이터 로드) ------------------
+    # ------------------ TARGET 기존 캐시 LOAD ------------------
     target_spreadsheet_id = os.environ.get("TARGET_SPREADSHEET_ID")
     if not target_spreadsheet_id:
         print("❌ TARGET_SPREADSHEET_ID 환경 변수가 설정되지 않았습니다.")
@@ -264,13 +266,12 @@ async def run_crawler():
     worksheet_name = "github"
     existing_titles_dict = {}
     
-    print(f"📥 타겟 스프레드시트에서 기존 캐시 분석 중... (ID: {target_spreadsheet_id})")
     try:
         target_doc = gc.open_by_key(target_spreadsheet_id)
         github_sheet = target_doc.worksheet(worksheet_name)
         existing_data = github_sheet.get_all_records()
         
-        # 12대 컬럼에 맞춰 기존 적재 정보를 동적으로 캐싱
+        # 12대 타이틀을 유연하게 캐싱하도록 동적 튜플 매핑
         for r in existing_data:
             if r.get("ID"):
                 existing_titles_dict[str(r["ID"])] = (
@@ -279,13 +280,13 @@ async def run_crawler():
                     r.get("C_혜택_1", ""), r.get("C_혜택_2", ""), r.get("C_혜택_3", ""),
                     r.get("D_감성_1", ""), r.get("D_감성_2", ""), r.get("D_감성_3", "")
                 )
-        print(f"✅ 기존 적재 데이터 {len(existing_titles_dict)}개를 캐싱했습니다. (중복 LLM 연산 방어)")
+        print(f"✅ 기수집된 기존 12대 옵션 상품 데이터 {len(existing_titles_dict)}개를 캐싱했습니다.")
     except Exception as cache_error:
-        print(f"⚠️ 기존 타겟 시트 로드 실패(첫 실행이거나 시트가 비었음). 원인: {cache_error}")
+        print(f"⚠️ 기존 시트 로드 실패. 원인: {cache_error}")
 
     runtime_titles_dict = {}
 
-    # ------------------ 3. 크롤링 및 LLM 변환 실행부 ------------------
+    # ------------------ CRAWLING RUN ------------------
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         context = await browser.new_context(
@@ -319,12 +320,12 @@ async def run_crawler():
                             total_count = int(count_text)
                             print(f"   ↳ 🎯 총 상품 수 동기화 성공: [{total_count}개]")
                 except Exception as e:
-                    print(f"   ⚠️ 총 상품 수 추출 실패 (기본 20개 모드로 작동): {e}")
+                    print(f"   ⚠️ 총 상품 수 추출 실패: {e}")
 
                 needed_scrolls = (total_count - 1) // 20 if total_count > 20 else 0
                 
                 if needed_scrolls > 0:
-                    print(f"   ↳ ⏳ 전수 노출을 위해 {needed_scrolls}번 스마트 스크롤을 실행합니다.")
+                    print(f"   ↳ ⏳ 전수 노출을 위해 {needed_scrolls}번 스마트 스크롤 작동.")
                     for scroll_step in range(1, needed_scrolls + 1):
                         await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
                         await asyncio.sleep(2.0)
@@ -340,7 +341,7 @@ async def run_crawler():
                 await asyncio.sleep(1.0)
 
                 final_items = await page.query_selector_all(".prod_list_wrap ul.type > li")
-                print(f"📦 최종 수집 엘리먼트 {len(final_items)}개! 조건부 병렬 처리를 시작합니다.")
+                print(f"📦 최종 수집된 타겟 엘리먼트 총 {len(final_items)}개! 조건부 병렬 처리를 시작합니다.")
                 
                 tasks = [
                     process_single_product(item, target_region, target_airport, current_url, existing_titles_dict, runtime_titles_dict) 
@@ -353,19 +354,19 @@ async def run_crawler():
                     if res is not None:
                         all_products.append(res)
 
-                print(f"✅ {target_region} 완료 (누적 {len(all_products)}개)")
+                print(f"✅ {target_region} (출발지: {target_airport}) 완료 ({len(all_products)}개 전수 적재 대기)")
                 await asyncio.sleep(1)
 
             except Exception as e:
                 print(f"❌ {current_url} 접속 에러: {e}")
                 continue
 
-        # ------------------ 4. 독립 타겟 구글 시트 단일 적재부 ------------------
+        # ------------------ 구글 시트 마스터 적재부 ------------------
         if all_products:
-            print(f"\n🚀 타겟 스프레드시트 결과 데이터 업데이트 시작...")
+            print("\n🚀 마스터 Raw 데이터 스프레드시트 업데이트 시작...")
             try:
                 df = pd.DataFrame(all_products)
-                # 12대 최적화 열 순서 강제 정의
+                # 12대 타이틀 열 구조 순서 확립
                 column_order = [
                     "ID", "원본상품명", "정제상품명", "가격", "URL", "이미지URL", "지정지역", "출발공항",
                     "A_정석_1", "A_정석_2", "A_정석_3",
@@ -376,14 +377,13 @@ async def run_crawler():
                 df = df[column_order]
                 data_to_upload = [df.columns.values.tolist()] + df.values.tolist()
 
-                # 마스터 타겟 시트 1개에 완벽히 동기화
                 sheet = target_doc.worksheet(worksheet_name)
                 sheet.clear()  
                 sheet.update(values=data_to_upload, range_name='A1')
-                print(f"🎯 완벽: [{target_doc.title}] 마스터 시트에 12대 마케팅 옵션 데이터가 안전하게 적재되었습니다.")
+                print(f"🎯 [성공] 마스터 Raw 시트 [{target_doc.title}]에 12개 옵션 데이터가 축적되었습니다.")
 
             except Exception as e:
-                print(f"❌ 구글 시트 최종 업데이트 실패: {e}")
+                print(f"❌ 구글 시트 결과 적재 에러: {e}")
         
         await browser.close()
 
