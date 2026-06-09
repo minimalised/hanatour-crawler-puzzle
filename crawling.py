@@ -382,4 +382,5 @@ async def run_crawler():
         
         await browser.close()
 
-if __name__ == "__
+if __name__ == "__main__":
+    asyncio.run(run_crawler())
