@@ -27,6 +27,7 @@ async def generate_naver_titles_llm(data):
 제공된 여행 상품 데이터를 바탕으로, 가이드라인을 완벽히 준수하는 4가지 서로 다른 마케팅 콘셉트의 상품명을 각각 3개씩(총 12개) 생성하세요.
 
 [입력 데이터]
+- 원본 상품명: {data['full_title']}  # 🌟 [교정] 특화 키워드(#NO쇼핑, #실속 등)를 GPT가 인지하도록 원본 상품명 항목 추가
 - 기준 상품명: {data['pure_title']}
 - 여행 지역: {data['region']}
 - 기간: {data['duration']}
@@ -163,16 +164,17 @@ async def process_single_product(item, target_region, target_airport, current_ur
         if img_url and img_url.startswith("//"): 
             img_url = "https:" + img_url
 
-        # 💡비용 최적화 12개 가드레일 매핑
+        # 💡 [교정] 복사 붙여넣기 오작동을 막기 위해 캐시 비교 기준을 pure_title에서 full_title(원본명)로 변경
         if product_id in existing_titles_dict:
             titles = existing_titles_dict[product_id]
-        elif pure_title in runtime_titles_dict:
-            titles = runtime_titles_dict[pure_title]
-            print(f"♻️ [비용 절감] 동일 회차 내 기본형 상품명 캐시 재사용: {pure_title}")
+        elif full_title in runtime_titles_dict:  # 🌟 pure_title ➡️ full_title 로 교정
+            titles = runtime_titles_dict[full_title]
+            print(f"♻️ [비용 절감] 동일 회차 내 원본형 상품명 캐시 재사용: {full_title}")
         else:
-            print(f"✨ [신규 상품 발견] LLM 12대 타이틀 통합 최초 생성: {pure_title}")
+            print(f"✨ [신규 상품 발견] LLM 12대 타이틀 통합 최초 생성: {full_title}")
             ai_input_data = {
                 "pure_title": pure_title,
+                "full_title": full_title,  # 🌟 GPT에 원본명을 전달할 수 있도록 적재 데이터 추가
                 "region": target_region,          
                 "departure_airport": target_airport, 
                 "duration": duration,
@@ -180,7 +182,7 @@ async def process_single_product(item, target_region, target_airport, current_ur
                 "hashtags": ", ".join(all_hashtags)
             }
             titles = await generate_naver_titles_llm(ai_input_data)
-            runtime_titles_dict[pure_title] = titles
+            runtime_titles_dict[full_title] = titles  # 🌟 캐시 키값 매핑 교정
 
         return {
             "ID": product_id,
@@ -380,5 +382,4 @@ async def run_crawler():
         
         await browser.close()
 
-if __name__ == "__main__":
-    asyncio.run(run_crawler())
+if __name__ == "__
