@@ -26,10 +26,14 @@ jobs:
           python -m pip install pandas gspread google-auth playwright playwright-stealth openai
           python -m playwright install chromium
 
-      # 💡 GOOGLE_JSON_RAW와 OPENAI_API_KEY 두 통행증을 모두 완벽하게 주입합니다.
-      - name: Run Existing Crawling
+      # 💡 4개의 Key(인증키 2개 + 시트 ID 2개)를 환경 변수로 완벽하게 주입합니다.
+      - name: Run Hanatour New Crawler
         env:
           GOOGLE_JSON_RAW: ${{ secrets.GOOGLE_JSON_RAW }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          # 🌟 새로 추가된 구글 스프레드시트 ID 시크릿 연동
+          SOURCE_SPREADSHEET_ID: ${{ secrets.SOURCE_SPREADSHEET_ID }}
+          TARGET_SPREADSHEET_IDS: ${{ secrets.TARGET_SPREADSHEET_IDS }}
         run: |
-          python -u crawling.py
+          # 실행할 파이썬 파일명을 새로 만드신 파일명(예: crawl_run.py)에 맞게 수정해 주세요!
+          python -u crawl_run.py
