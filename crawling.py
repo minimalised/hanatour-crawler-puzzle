@@ -36,7 +36,7 @@ async def generate_naver_titles_llm(data):
 - 추출 키워드: {data['hashtags']}
 
 [❌ 전 콘셉트 공통 절대 금지 가이드라인]
-1. 글자 수: 모든 상품명은 공백 포함 최소 25자 ~ 최대 35자 사이로 구성한다. (40자 절대 초과 금지)
+1. 글자 수: 모든 상품명은 공백 포함 최소 30자 ~ 최대 45자 사이로 구성한다. (50자 절대 초과 금지)
 2. 중복 제거: 단일 상품명 내부에서 동일한 단어(ex: 방콕, 여행, 패키지 등)가 2회 이상 중복 나열되는 것을 절대 금지한다.
 3. 정제성: '신상품', '세이브', '특가', '대박', '★' 같은 홍보성 문구나 특수문자는 절대 포함하지 않는다.
 4. 출발지 조건 규칙: [지정 출발공항]이 '없음'일 경우 '기본출발' 등을 임의로 조작하지 말고 무조건 곧바로 지역명/브랜드명으로 시작한다.
@@ -79,7 +79,7 @@ async def generate_naver_titles_llm(data):
                 {"role": "user", "content": prompt}
             ],
             response_format=json_schema_format,
-            temperature=0,
+            temperature=0.4,
             seed=42
         )
         
