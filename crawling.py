@@ -13,10 +13,10 @@ from openai import AsyncOpenAI
 openai_client = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY", "YOUR_LOCAL_API_KEY"))
 SPREADSHEET_ID = "1mH51VHs4y0FgClkUBvZgw7oY3Yv7gQBA_a3um9uhX0I"
 
-# 전 영역 공통 타겟 콘셉트 리스트 구조 정의
-CONCEPTS = ['A', 'B', 'C', 'D']
+# 💡 [교정] 총 5개 콘셉트 x 3개씩 = 총 15개 타이틀 마스터 컬럼 정의
+CONCEPTS = ['A', 'B', 'C', 'D', 'E']
 NUMS = [1, 2, 3]
-TITLE_COLUMNS = [f"{c}_{n}" for c in CONCEPTS for n in NUMS]  # A_1, A_2 ... D_3 총 12개
+TITLE_COLUMNS = [f"{c}_{n}" for c in CONCEPTS for n in NUMS]  # A_1 ~ E_3 총 15개
 
 
 # ==========================================
@@ -31,12 +31,12 @@ def get_gspread_client():
 
 
 # ==========================================
-# [함수 2] ⚡ 완료: 4대 콘셉트 x 3개 (총 12개) 배치 LLM 타이틀 생성기
+# [함수 2] ⚡ 완료: 5대 콘셉트 x 3개 (총 15개) 배치 LLM 타이틀 생성기
 # ==========================================
 async def generate_naver_titles_batch_llm(products_list):
     """
     5개의 상품 데이터를 한 번에 묶어서 하나의 프롬프트로 gpt-4o-mini에 던지고,
-    각 상품마다 4가지 콘셉트별 3개씩(총 12개)의 마케팅 타이틀을 무결한 JSON 형태로 반환받습니다.
+    각 상품마다 5가지 콘셉트별 3개씩(총 15개)의 마케팅 타이틀을 무결한 JSON 형태로 반환받습니다.
     """
     input_items_text = ""
     for p in products_list:
@@ -51,14 +51,14 @@ async def generate_naver_titles_batch_llm(products_list):
 
     prompt = f"""
 당신은 네이버 쇼핑 검색 최적화(SEO) 및 소비자 심리를 꿰뚫는 초일류 퍼포먼스 마케팅 카피라이팅 전문가입니다.
-제공된 여러 개의 여행 상품 데이터 목록을 보고, 가이드라인을 완벽히 준수하는 4가지 서로 다른 마케팅 콘셉트의 상품명을 각각 3개씩(총 12개) 생성하여 매핑하세요.
+제공된 여러 개의 여행 상품 데이터 목록을 보고, 가이드라인을 완벽히 준수하는 5가지 서로 다른 마케팅 콘셉트의 상품명을 각각 3개씩(총 15개) 생성하여 매핑하세요.
 
 [💎 중요: 상품 등급별 키워드 의무 반영 규칙]
-입력 데이터의 '원본 상품명'에 포함된 상품 등급별 괄호 문구를 파악하여, 생성되는 모든 상품명(A~D 전 콘셉트 공통)에 아래 키워드를 반드시 자연스럽게 녹여내세요.
+입력 데이터의 '원본 상품명'에 포함된 상품 등급별 괄호 문구를 파악하여, 생성되는 모든 상품명(A~E 전 콘셉트 공통)에 아래 키워드를 반드시 자연스럽게 녹여내세요.
 1. 원본 상품명에 '[세이브]'가 포함된 경우: 
    - '세이브'라는 단어 자체는 쓰지 말고, 대신 [실속], [가성비추천], [합리적], [부담없는] 등 경제성과 실속을 전면 강조하는 명사 키워드를 조합하세요.
 2. 원본 상품명에 '[스탠다드]'가 포함된 경우:
-   - '스탠다드'라는 단어 대신 [핵심일정], [완벽구성], [알찬여행], [밸런스추천] 등 일정의 탄탄함และ 균형 잡힌 구성을 강조하는 키워드를 조합하세요.
+   - '스탠다드'라는 단어 대신 [핵심일정], [완벽구성], [알찬여행], [밸런스추천] 등 일정의 탄탄함과 균형 잡힌 구성을 강조하는 키워드를 조합하세요.
 3. 원본 상품명에 '[프리미엄]'이 포함된 경우:
    - '프리미엄'이라는 단어 대신 [노쇼핑], [노팁], [노옵션], [자유시간포함], [전일정5성숙소] 등 소비자가 피로감을 느끼지 않고 가장 편안하고 고급스러운 혜택성 키워드를 전면에 배치하세요.
 
@@ -74,18 +74,19 @@ async def generate_naver_titles_batch_llm(products_list):
 2. 중복 제거: 단일 상품명 내부에서 동일한 단어(ex: 방콕, 여행, 패키지 등)가 2회 이상 중복 나열되는 것을 절대 금지한다.
 3. 정제성: '신상품', '세이브', '특가', '대박', '★' 같은 홍보성 문구나 특수문자는 절대 포함하지 않는다.
 4. 출발지 조건 규칙: [지정 출발공항]이 '없음'일 경우 '기본출발' 등을 임의로 조작하지 말고 무조건 곧바로 지역명/브랜드명으로 시작한다.
-5. 결과물 간 상호 중복 엄금: 한 상품 내에서 생성되는 12개의 상품명은 조사나 어순만 바꾼 수준이 아니라 완전히 다른 키워드 조합을 가져야 한다.
+5. 결과물 간 상호 중복 엄금: 한 상품 내에서 생성되는 15개의 상품명은 조사나 어순만 바꾼 수준이 아니라 완전히 다른 키워드 조합을 가져야 한다.
 
 [🎯 콘셉트별 상세 생성 규칙]
 ■ 콘셉트 A (정석 SEO형 - 3개): 핵심 키워드 위주의 명사 나열 조합. (3개 간 키워드 배치 순서를 다르게 뒤섞을 것)
 ■ 콘셉트 B (타겟/상황형 - 3개): 타겟 키워드를 3개가 각각 다르게 선택 (부모님 효도, 아이동반, 부부여행 등)
 ■ 콘셉트 C (혜택/USP형 - 3개): 소비자가 직관적으로 이득을 느끼는 등급별 프리미엄/실속 혜택 명사화 강조.
 ■ 콘셉트 D (감성/트렌디형 - 3개): 요즘뜨는, 인생샷, 감성숙소 등 감성 단어가 겹치지 않게 분산.
+■ 콘셉트 E (기본 대안형 - 3개): 💡 원본 상품명의 원형 직관성을 존중하되 명사 배열과 SEO 키워드를 깔끔하게 가다듬은 기본 대안 조합.
 
 반드시 요청한 모든 상품 ID가 완벽히 포함된 구조화된 JSON 오브젝트 포맷으로만 응답하세요.
 """
     
-    # 5개 상품 세트의 동적 ID 프로퍼티 스키마 빌드업
+    # 5개 상품 세트의 동적 ID 프로퍼티 스키마 빌드업 (15개 스펙으로 자동 적용)
     properties_schema = {}
     for p in products_list:
         properties_schema[p['ID']] = {
@@ -98,7 +99,7 @@ async def generate_naver_titles_batch_llm(products_list):
     json_schema_format = {
         "type": "json_schema",
         "json_schema": {
-            "name": "naver_twelve_titles_batch_schema",
+            "name": "naver_fifteen_titles_batch_schema",
             "strict": True,
             "schema": {
                 "type": "object",
@@ -246,23 +247,23 @@ async def run_pipeline():
     df_final = df_new.drop_duplicates(subset=["ID"]).copy()
 
     # -------------------------------------------------------------
-    # 💡 5.5단계: [초고속 레이어] 스마트 증분 매핑 및 배치 12대 타이틀 연산
+    # 💡 5.5단계: [초고속 레이어] 스마트 증분 매핑 및 배치 15대 타이틀 연산
     # -------------------------------------------------------------
     target_s_id = os.environ.get("TARGET_SPREADSHEET_ID")
     worksheet_name = "github"
     
-    # 신규 타이틀 12개 빈 컬럼 일괄 확장 생성
+    # 💡 신규 타이틀 15개 빈 컬럼 일괄 확장 생성 (자동동화)
     for col in TITLE_COLUMNS:
         df_final[col] = ""
 
-    # ⏳ [전략 1] 스마트 증분 업데이트: 기존 시트에 12개 컬럼이 완벽히 연산된 데이터 재활용
+    # ⏳ [전략 1] 스마트 증분 업데이트: 기존 시트에 15개 컬럼이 완벽히 연산된 데이터 재활용
     if target_s_id:
         try:
             target_doc = gc.open_by_key(target_s_id)
             old_records = target_doc.worksheet(worksheet_name).get_all_records()
             if old_records:
                 df_old = pd.DataFrame(old_records)
-                # 12개 마스터 컬럼이 기존 시트에 완벽히 존재하는지 체크
+                # 💡 15개 마스터 컬럼이 기존 시트에 완벽히 존재하는지 체크하도록 연동 변경
                 if all(col in df_old.columns for col in ["ID"] + TITLE_COLUMNS):
                     df_old_titles = df_old[["ID"] + TITLE_COLUMNS].drop_duplicates(subset=["ID"])
                     
@@ -272,15 +273,15 @@ async def run_pipeline():
                         on="ID", 
                         how="left"
                     ).fillna("")
-                    print("✅ [스마트 증분] 기존 적재된 12대 콘셉트 타이틀 매핑 성공 및 LLM 차단 보전 완료.")
+                    print("✅ [스마트 증분] 기존 적재된 15대 콘셉트 타이틀 매핑 성공 및 LLM 차단 보전 완료.")
         except Exception as e:
             print(f"ℹ️ 기존 적재 시트 대조 패스 (신규 적재 혹은 시트 데이터 양식 상이): {e}")
 
-    # ⚡ [전략 2] 배치 처리: 12개 타이틀 중 첫 컬럼(A_1)이 비어 있는 신규 행만 추출하여 5개씩 바인딩 연산
+    # ⚡ [전략 2] 배치 처리: 15개 타이틀 중 첫 컬럼(A_1)이 비어 있는 신규 행만 추출하여 5개씩 바인딩 연산
     is_new_product = (df_final["A_1"] == "") | (df_final["A_1"].isna())
     df_need_llm = df_final[is_new_product].copy()
     
-    print(f"🚀 [배치 연산] 총 {len(df_final)}개 상품 중 12대 타이틀 신규 생성 상품: {len(df_need_llm)}개")
+    print(f"🚀 [배치 연산] 총 {len(df_final)}개 상품 중 15대 타이틀 신규 생성 상품: {len(df_need_llm)}개")
 
     if len(df_need_llm) > 0:
         batch_size = 5
@@ -288,9 +289,9 @@ async def run_pipeline():
         
         for i in range(0, len(records_to_llm), batch_size):
             chunk = records_to_llm[i:i+batch_size]
-            print(f"   [LLM 12대 대량 연산] {i+1}번째 ~ {i+len(chunk)}번째 상품 묶음 컨셉 타이틀 자동 생성 중...")
+            print(f"   [LLM 15대 대량 연산] {i+1}번째 ~ {i+len(chunk)}번째 상품 묶음 컨셉 타이틀 자동 생성 중...")
             
-            # 5개 상품 일괄 동시 요청 (A_1~D_3 총 12개 리턴)
+            # 5개 상품 일괄 동시 요청 (A_1~E_3 총 15개 리턴)
             batch_result = await generate_naver_titles_batch_llm(chunk)
             
             # 받아온 묶음 JSON 데이터를 데이터프레임 매핑 로직에 할당
@@ -299,7 +300,7 @@ async def run_pipeline():
                 if p_id in batch_result:
                     res = batch_result[p_id]
                     idx = df_final[df_final["ID"] == p_id].index[0]
-                    # 12개 컬럼 루프 매핑
+                    # 15개 컬럼 루프 매핑
                     for col in TITLE_COLUMNS:
                         df_final.at[idx, col] = res.get(col, "[Error]").strip()
             
@@ -310,7 +311,7 @@ async def run_pipeline():
     # -------------------------------------------------------------
     print(f"\n💾 [6단계] 최종 데이터 적재 준비 (총 {len(df_final)}개 상품)...")
     
-    # 12개 전체 컬럼 배치 순서 설정
+    # 💡 15개 전체 컬럼 배치 순서 세팅 완벽 결합
     column_order = ["ID", "상품명", "가격", "URL", "이미지URL", "지역", "출발공항"] + TITLE_COLUMNS
     df_final = df_final[column_order].fillna("")
 
@@ -328,7 +329,7 @@ async def run_pipeline():
     else:
         print("⚠️ [경고] TARGET_SPREADSHEET_ID 환경 변수가 설정되지 않아 구글 시트에 적재하지 못했습니다.")
 
-    print("\n🎉 고유 ID 기반 마스터 19대 컬럼 데이터 최신화 파이프라인이 정상 종료되었습니다!")
+    print("\n🎉 고유 ID 기반 마스터 22대 컬럼 데이터 최신화 파이프라인이 정상 종료되었습니다!")
 
 
 if __name__ == "__main__":
