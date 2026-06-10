@@ -26,73 +26,75 @@ def get_gspread_client():
 
 
 # ==========================================
-# [함수 2] 💡 신규 추가: 단일 상품 LLM 타이틀 생성기
+# [함수 2] ⚡ 최적화: 다중 상품(배치) LLM 타이틀 생성기
 # ==========================================
-async def generate_naver_titles_llm(row_dict):
+async def generate_naver_titles_batch_llm(products_list):
     """
-    GPT-4o-mini를 활용하여 상품의 공항, 금액(등급)을 반영한 독창적인 네이버 SEO 상품명 3개를 생성합니다.
+    5개의 상품 데이터를 한 번에 묶어서 하나의 프롬프트로 gpt-4o-mini에 던지고,
+    요청한 모든 ID가 포함된 JSON 오브젝트 포맷으로 한 번에 반환받아 속도를 극대화합니다.
     """
-    # 출발공항 동적 콘텍스트
-    departure_context = f"- 지정 출발공항: {row_dict['출발공항']}" if row_dict['출발공항'] != "없음" else "- 지정 출발공항: 없음"
-    
-    # 금액대별 등급 콘텍스트 자동 분기 (획일화 방지 핵심 로직)
-    price_val = row_dict.get('가격', 0)
-    if price_val >= 1500000:
-        grade_context = f"- 상품 등급: 프리미엄 고가 라인 ({price_val:,}원) -> '품격', '노팁/노옵션', '5성급 호텔' 등 고급화 전략 소구 필수"
-    elif price_val <= 800000:
-        grade_context = f"- 상품 등급: 세이브/실속 가성비 라인 ({price_val:,}원) -> '가성비', '실속', '합리적' 등 금액적 메리트 소구 필수"
-    else:
-        grade_context = f"- 상품 등급: 스탠다드 표준 라인 ({price_val:,}원) -> 균형 잡힌 실용적 혜택 소구"
+    input_items_text = ""
+    for p in products_list:
+        departure = f"출발공항: {p['출발공항']}" if p['출발공항'] != "없음" else "출발공항: 없음"
+        price_grade = "프리미엄 고가 라인" if p['가격'] >= 1500000 else ("세이브 가성비 라인" if p['가격'] <= 800000 else "스탠다드 표준 라인")
+        
+        input_items_text += f"""
+        - ID: {p['ID']}
+          상품명: {p['상품명']}
+          지역: {p['지역']}
+          {departure}
+          등급: {price_grade} ({p['가격']:,}원)
+        --------------------------------------"""
 
     prompt = f"""
 당신은 네이버 쇼핑 검색 최적화(SEO) 기준에 맞춰 여행 상품명을 정제하고 재창조하는 마케팅 자동화 전문가입니다.
-제공된 정형 데이터를 바탕으로 가이드라인을 완벽히 준수하는 새로운 상품명 3개를 생성하세요.
+아래 제공된 여러 개의 여행 상품 데이터 목록을 보고, 가이드라인을 완벽히 준수하는 새로운 상품명 3개씩을 각각의 [ID]에 맞춰 생성하세요.
 
-[입력 데이터]
-- 원본 상품명: {row_dict['상품명']}
-- 여행 지역: {row_dict['지역']}
-{departure_context}
-{grade_context}
+[입력 상품 목록]
+{input_items_text}
 
 [네이버 쇼핑 상품명 가이드라인]
-1. 글자 수: 공백 포함 최소 35자 ~ 최대 45자 사이로 구성한다. (50자 절대 초과 금지)
+1. ★ 글자 수 제약 ★: 모든 상품명은 반드시 '공백을 포함하여 최소 35자 ~ 최대 45자 사이'로 풍성하게 구성한다. (50자를 절대 초과해서는 안 됨)
 2. 중복 제거: 상품명 내부에서 동일한 단어(ex: 방콕, 여행, 패키지 등)가 2회 이상 중복 나열되는 것을 절대 금지한다.
 3. 정제성: '신상품', '특가', '대박', '★' 같은 홍보성 성격의 특수문자는 절대 포함하지 않는다.
 4. 출발지 조건 규칙: 
    - [지정 출발공항]이 존재할 경우: 반드시 상품명 맨 앞에 대괄호 형태로 배치한다. (예: [대구출발], [부산출발])
    - [지정 출발공항]이 '없음'일 경우: 무조건 곧바로 지역명/브랜드명으로 상품명을 시작한다.
-5. 포맷: 문장이 아닌 명사형 키워드의 깔끔한 띄어쓰기 조합으로 구성한다.
+5. 포맷: 문장이 아닌 명사형 키워드의 깔끔한 띄어쓰기 조합으로 구성한다. 
+   ※ 35자 이상의 길이를 안정적으로 채우기 위해 [지역 + 주요 타겟/시즌 + 일정 + 핵심 혜택/소구점 키워드]를 다양하고 풍부하게 조합하여 가득 채울 것.
 
 ⚠️ [철저한 차별화 보장 규칙]
 동일한 지역의 상품이더라도 금액(등급)이나 출발공항이 다르면 세일즈 포인트가 완전히 달라야 합니다. 
 기존 상품들과 똑같은 단어 조합을 무지성으로 반복 출력하는 것을 절대 금지하며, 등급 콘텍스트에 맞춰 완전히 독립적이고 독창적인 문구를 창조하세요.
 
-반드시 아래 JSON 포맷으로만 응답하세요. 다른 설명은 생략합니다.
+반드시 요청한 모든 ID가 누락 없이 포함된 아래 JSON 포맷으로만 응답하세요. 다른 설명은 전면 금지합니다.
 {{
-  "option_1": "생성 문구 1",
-  "option_2": "생성 문구 2",
-  "option_3": "생성 문구 3"
+  "상품_ID_1": {{
+    "option_1": "생성 문구 1",
+    "option_2": "생성 문구 2",
+    "option_3": "생성 문구 3"
+  }},
+  "상품_ID_2": {{
+    "option_1": "생성 문구 1",
+    "option_2": "생성 문구 2",
+    "option_3": "생성 문구 3"
+  }}
 }}
 """
     try:
         response = await openai_client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "You are a helpful assistant that outputs JSON."},
+                {"role": "system", "content": "You are a helpful assistant that outputs JSON according to the requested format."},
                 {"role": "user", "content": prompt}
             ],
             response_format={"type": "json_object"},
-            temperature=0.5  # 💡 중복 생성을 깨부수기 위해 다양성 옵션 상향 조정
+            temperature=0.5
         )
-        result_json = json.loads(response.choices[0].message.content)
-        return (
-            result_json.get("option_1", "").strip(),
-            result_json.get("option_2", "").strip(),
-            result_json.get("option_3", "").strip()
-        )
+        return json.loads(response.choices[0].message.content)
     except Exception as e:
-        print(f"❌ LLM 상품명 생성 중 에러 발생: {e}")
-        return "[Error]", "[Error]", "[Error]"
+        print(f"❌ LLM 배치 타이틀 생성 중 에러 발생: {e}")
+        return {}
 
 
 # ==========================================
@@ -216,42 +218,76 @@ async def run_pipeline():
     df_final = df_new.drop_duplicates(subset=["ID"]).copy()
 
     # -------------------------------------------------------------
-    # 💡 5.5단계: 신규 추가된 LLM 타이틀 조합 연산 레이어
+    # 💡 5.5단계: [초고속 레이어] 스마트 증분 매핑 및 배치 LLM 연산
     # -------------------------------------------------------------
-    print(f"\n🚀 [추가 단계] 고유 상품 {len(df_final)}개 대상 LLM 마케팅 타이틀 조합 시작...")
+    target_s_id = os.environ.get("TARGET_SPREADSHEET_ID")
+    worksheet_name = "github"
     
-    # 신규 타이틀을 적재할 빈 컬럼 생성
+    # 신규 타이틀 기본 컬럼 생성
     df_final["네이버_상품명_1"] = ""
     df_final["네이버_상품명_2"] = ""
     df_final["네이버_상품명_3"] = ""
 
-    # 전수 데이터를 안전하게 순회하며 LLM 타이틀 장착
-    for idx, row in df_final.iterrows():
-        row_dict = row.to_dict()
-        print(f"   [LLM 연산] {row_dict['상품명']} ({row_dict['출발공항']}출발 / {row_dict['가격']:,}원) 제목 조합 중...")
+    # ⏳ [전략 1] 스마트 증분 업데이트: 기존 시트에 이미 연산된 내역이 있다면 LLM 생략 및 재활용
+    if target_s_id:
+        try:
+            target_doc = gc.open_by_key(target_s_id)
+            old_records = target_doc.worksheet(worksheet_name).get_all_records()
+            if old_records:
+                df_old = pd.DataFrame(old_records)
+                if all(col in df_old.columns for col in ["ID", "네이버_상품명_1", "네이버_상품명_2", "네이버_상품명_3"]):
+                    df_old_titles = df_old[["ID", "네이버_상품명_1", "네이버_상품명_2", "네이버_상품명_3"]].drop_duplicates(subset=["ID"])
+                    
+                    # 기존 타이틀 필드를 기존 df_final 결합용으로 맵 결합 (Left Join)
+                    df_final = pd.merge(
+                        df_final.drop(columns=["네이버_상품명_1", "네이버_상품명_2", "네이버_상품명_3"], errors='ignore'), 
+                        df_old_titles, 
+                        on="ID", 
+                        how="left"
+                    ).fillna("")
+                    print("✅ [스마트 증분] 기존에 적재되었던 상품명 타이틀 데이터를 마스터셋에 매핑했습니다.")
+        except Exception as e:
+            print(f"ℹ️ 기존 적재 시트 대조 패스 (신규 적재 혹은 시트가 비어있음): {e}")
+
+    # ⚡ [전략 2] 배치 처리: 여전히 비어 있는 진짜 "신규 상품"만 발라내서 5개씩 묶어 초고속 연산
+    is_new_product = (df_final["네이버_상품명_1"] == "") | (df_final["네이버_상품명_1"].isna())
+    df_need_llm = df_final[is_new_product].copy()
+    
+    print(f"🚀 [배치 연산] 총 {len(df_final)}개 상품 중 신규 연산 대상 상품: {len(df_need_llm)}개")
+
+    if len(df_need_llm) > 0:
+        batch_size = 5
+        records_to_llm = df_need_llm.to_dict(orient="records")
         
-        t1, t2, t3 = await generate_naver_titles_llm(row_dict)
-        
-        df_final.at[idx, "네이버_상품명_1"] = t1
-        df_final.at[idx, "네이버_상품명_2"] = t2
-        df_final.at[idx, "네이버_상품명_3"] = t3
-        
-        # API 부하 분산 및 분당 제한(RPM) 방지 안전망
-        await asyncio.sleep(0.1)
+        for i in range(0, len(records_to_llm), batch_size):
+            chunk = records_to_llm[i:i+batch_size]
+            print(f"   [LLM 배치 연산] {i+1}번째 ~ {i+len(chunk)}번째 신규 상품 묶음 타이틀 생성 중...")
+            
+            # 5개 상품 일괄 동시 요청
+            batch_result = await generate_naver_titles_batch_llm(chunk)
+            
+            # 결과를 원본 데이터프레임(df_final)에 ID 기준으로 고속 업데이트
+            for product in chunk:
+                p_id = product["ID"]
+                if p_id in batch_result:
+                    res = batch_result[p_id]
+                    idx = df_final[df_final["ID"] == p_id].index[0]
+                    df_final.at[idx, "네이버_상품명_1"] = res.get("option_1", "[Error]").strip()
+                    df_final.at[idx, "네이버_상품명_2"] = res.get("option_2", "[Error]").strip()
+                    df_final.at[idx, "네이버_상품명_3"] = res.get("option_3", "[Error]").strip()
+            
+            # 분당 API 호출수(RPM) 제한 안전망 최소 마진
+            await asyncio.sleep(0.1)
 
     # -------------------------------------------------------------
     # 6. 지정된 단일 구글 스프레드시트 적재 (Overwrite)
     # -------------------------------------------------------------
     print(f"\n💾 [6단계] 최종 데이터 적재 준비 (총 {len(df_final)}개 상품)...")
     
-    # 💡 컬럼 순서에 LLM 생성 제목 추가 반영
     column_order = ["ID", "상품명", "가격", "URL", "이미지URL", "지역", "출발공항", "네이버_상품명_1", "네이버_상품명_2", "네이버_상품명_3"]
     df_final = df_final[column_order].fillna("")
 
     data_to_upload = [df_final.columns.values.tolist()] + df_final.values.tolist()
-
-    target_s_id = os.environ.get("TARGET_SPREADSHEET_ID")
-    worksheet_name = "github"
 
     if target_s_id:
         try:
@@ -265,7 +301,7 @@ async def run_pipeline():
     else:
         print("⚠️ [경고] TARGET_SPREADSHEET_ID 환경 변수가 설정되지 않아 구글 시트에 적재하지 못했습니다.")
 
-    print("\n🎉 고유 ID 기반 10대 마스터 데이터 최신화 파이프라인이 정상 종료되었습니다!")
+    print("\n🎉 고유 ID 기반 마스터 데이터 최신화 파이프라인이 최적화 모드로 정상 종료되었습니다!")
 
 
 if __name__ == "__main__":
