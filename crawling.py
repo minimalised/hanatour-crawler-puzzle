@@ -12,7 +12,7 @@ from openai import AsyncOpenAI
 
 openai_client = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY", "YOUR_LOCAL_API_KEY"))
 
-# 🌟 [대개조] 상품 10개 묶음을 한 번에 받아내는 매시브 JSON 스키마 세팅
+# [대개조] 상품 10개 묶음을 한 번에 받아내는 매시브 JSON 스키마 세팅
 massive_json_schema = {
     "type": "json_schema",
     "json_schema": {
@@ -50,7 +50,6 @@ async def generate_massive_titles_llm(products_chunk):
     """
     [완전 가속] 리스트로 들어온 복수의 상품 세트를 단 한 번의 LLM 호출로 '통연산' 융합 처리합니다.
     """
-    # 요청 보낼 상품 데이터 텍스트 조립
     input_data_str = ""
     for idx, p in enumerate(products_chunk, start=1):
         dep_airport = p['출발공항']
@@ -78,7 +77,7 @@ async def generate_massive_titles_llm(products_chunk):
 2. [스탠다드] 포함: 상품명 내부/맨 뒤에 핵심일정, 알찬구성, 베스트셀러 등의 탄탄한 구성 수식어 필수 (ex: 알찬구성, 핵심일정포함)
 3. [프리미엄] 포함: 상품명 내부/맨 뒤에 노쇼핑, 노팁, 노옵션, 5성호텔 등 프리미엄 혜택 수식어 필수 (ex: 노쇼핑노팁, 전일정오성급)
 
-[❌ 공통 절대 금지 가이드라인]
+[❌ 전 콘셉트 공통 절대 금지 가이드라인]
 1. 글자 수: 모든 상품명은 공백 포함 최소 30자 ~ 최대 45자 사이로 구성한다. (50자 절대 초과 금지)
 2. 중복 제거: 단일 상품명 내부에서 동일한 단어(ex: 방콕, 여행, 패키지 등)가 2회 이상 중복 나열되는 것을 절대 금지한다.
 3. 정제성: '신상품', '세이브', '특가' 같은 단어 자체나 특수문자는 절대 포함하지 않는다.
@@ -104,6 +103,7 @@ async def generate_massive_titles_llm(products_chunk):
         print(f"❌ 대량 통연산 중 에러 발생: {e}")
         return []
 
+# 🌟 매개변수 구조 재정렬 (매칭 유도)
 async def scrape_single_product_elements(item, target_region, target_airport, current_url):
     try:
         main_info = await item.query_selector(":scope > .inr.right")
@@ -160,7 +160,8 @@ async def scrape_single_product_elements(item, target_region, target_airport, cu
             "URL": current_url, "이미지URL": img_url, "지정지역": target_region, "출발공항": target_airport,
             "duration": duration, "description": product_desc, "hashtags": ", ".join(all_hashtags)
         }
-    except:
+    except Exception as element_error:
+        print(f"⚠️ 개별 자식 엘리먼트 파싱 내부 에러: {element_error}")
         return None
 
 async def run_crawler():
@@ -181,7 +182,7 @@ async def run_crawler():
         target_tasks = [{"url": r[0].strip(), "sheet_region": r[1].strip() if len(r) > 1 and r[1].strip() else "지역명 미상", "sheet_airport": r[2].strip() if len(r) > 2 and r[2].strip() else "없음"} for r in source_sheet.get_all_values()[1:] if len(r) >= 1 and r[0].startswith("http")]
         print(f"✅ 총 {len(target_tasks)}개의 타겟 URL 주소를 확보했습니다.")
     except Exception as e:
-        print(f"❌ URL 가공 에러: {e}"); return
+        print(f"❌ URL 리스트 가공 에러: {e}"); return
 
     # 마스터 캐시 LOAD
     target_spreadsheet_id = os.environ.get("TARGET_SPREADSHEET_ID")
@@ -194,7 +195,7 @@ async def run_crawler():
                 existing_titles_dict[str(r["ID"])] = [r.get(f"{c}_{i}", "") for c in ['A_정석', 'B_타겟', 'C_혜택', 'D_감성'] for i in [1,2,3]]
         print(f"✅ 기수집 마스터 캐시 데이터 {len(existing_titles_dict)}개 로드 완료.")
     except:
-        print("⚠️ 기존 시트 로드 패스.")
+        print("⚠️ 기존 시트 로드 패스 (시트가 비어있거나 최초 실행일 수 있음).")
 
     # =======================================================================
     # 🌟 [STAGE 1] 고속 웹 크롤링 스테이지 (전수조사)
@@ -204,12 +205,15 @@ async def run_crawler():
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
-        context = await browser.new_context(viewport={'width': 1280, 'height': 1024}, user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64)...")
+        context = await browser.new_context(
+            viewport={'width': 1280, 'height': 1024}, 
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+        )
         page = await context.new_page()
 
         for idx, task in enumerate(target_tasks, start=1):
             try:
-                print(f"🔄 [{idx}/{len(target_tasks)}] {task['sheet_region']} 스크래핑...")
+                print(f"🔄 [{idx}/{len(target_tasks)}] {task['sheet_region']} 스크래핑 진행 중...")
                 await page.goto(task["url"], wait_until="domcontentloaded", timeout=25000)
                 
                 total_count = 20
@@ -222,10 +226,16 @@ async def run_crawler():
                     await asyncio.sleep(1.0)
 
                 final_items = await page.query_selector_all(".prod_list_wrap ul.type > li")
-                batch_results = await asyncio.gather(*[scrape_single_product_elements(item, task["sheet_region"], task["sheet_airport"], task["url"]) for item in final_items])
+                
+                # 🌟 [정밀 수정구역] 인자 개수를 매개변수 선언부와 정확하게 4개로 일치시킴
+                batch_results = await asyncio.gather(*[
+                    scrape_single_product_elements(item, task["sheet_region"], task["sheet_airport"], task["url"]) 
+                    for item in final_items
+                ])
+                
                 raw_scraped_list.extend([res for res in batch_results if res])
             except Exception as e:
-                print(f"❌ URL 패스 에러: {e}")
+                print(f"❌ [{task['sheet_region']}] 스크래핑 도중 에러 패스: {e}")
         await browser.close()
 
     # =======================================================================
@@ -234,24 +244,24 @@ async def run_crawler():
     print("\n🧹 [STAGE 2] 상품 고유 내용물(ID) 기준 중복 필터링 작동...")
     df_raw = pd.DataFrame(raw_scraped_list)
     if df_raw.empty:
-        print("❌ 수집된 데이터가 없습니다."); return
+        print("❌ [치명적] 웹에서 수집된 데이터 행이 0개입니다. 크롤링 선택자나 페이지 로딩 상태를 점검해야 합니다.")
+        return
+        
     df_raw = df_raw.drop_duplicates(subset=["ID"], keep="first")
     clean_scraped_list = df_raw.to_dict(orient="records")
     print(f"🧹 중복 제거 완료 ➡️ 최종 [{len(clean_scraped_list)}개] 고유 상품 확정.")
 
     # =======================================================================
-    # 🌟 [STAGE 3] 🚀 대량 상품 '10개씩 통연산' 병렬 레이어 구역
+    # 🌟 [STAGE 3] 대량 상품 '10개씩 통연산' 병렬 레이어 구역
     # =======================================================================
     print("\n🤖 [STAGE 3] 신규/누락 상품 대상 10개 세트 통연산 LLM을 가동합니다...")
     
-    # 1. 캐시 필터링을 통해 진짜 GPT를 호출해야 하는 '신규 상품 대상자'만 선별
     needed_llm_products = []
     final_synced_products_dict = {}
 
     for item in clean_scraped_list:
         p_id = item["ID"]
         if p_id in existing_titles_dict and all(str(t).strip() for t in existing_titles_dict[p_id]):
-            # 기존 캐시 완벽 보존 행
             t = existing_titles_dict[p_id]
             final_synced_products_dict[p_id] = {**item, **{f"{c}_{i}": t[idx] for idx, (c, i) in enumerate([(concepts, idx_num) for concepts in ['A_정석', 'B_타겟', 'C_혜택', 'D_감성'] for idx_num in [1, 2, 3]])}}
         else:
@@ -259,19 +269,16 @@ async def run_crawler():
 
     print(f"📊 전수 [{len(clean_scraped_list)}개] 중 캐시 유지 상품: [{len(final_synced_products_dict)}개] | 실시간 GPT 통연산 필요 상품: [{len(needed_llm_products)}개]")
 
-    # 2. 10개씩 청크 분할하여 초고속 통연산 수행 (Gather 병렬화 결합)
     chunk_size = 10
     chunks = [needed_llm_products[i:i + chunk_size] for i in range(0, len(needed_llm_products), chunk_size)]
     
     async def process_chunk(chunk):
         llm_results = await generate_massive_titles_llm(chunk)
-        # 받은 JSON 배열 결과를 원본 매칭 딕셔너리에 융합
         res_dict = {r["ID"]: r for r in llm_results if "ID" in r}
         
         local_synced = []
         for item in chunk:
             p_id = item["ID"]
-            # 만약 LLM 연산 실패 시 방어 코드
             r = res_dict.get(p_id, {})
             local_synced.append({
                 **item,
@@ -284,7 +291,6 @@ async def run_crawler():
 
     if chunks:
         print(f"🚀 총 {len(chunks)}개의 연산 대형 청크 세트 동시 돌입.")
-        # 청크 세트 자체도 비동기 동시 실행하여 액션 러너 타임아웃 완전 무력화
         llm_batch_results = await asyncio.gather(*[process_chunk(c) for c in chunks])
         for batch in llm_batch_results:
             for item in batch:
