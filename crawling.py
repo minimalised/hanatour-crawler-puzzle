@@ -103,7 +103,6 @@ async def generate_massive_titles_llm(products_chunk):
         print(f"❌ 대량 통연산 중 에러 발생: {e}")
         return []
 
-# 🌟 매개변수 구조 재정렬 (매칭 유도)
 async def scrape_single_product_elements(item, target_region, target_airport, current_url):
     try:
         main_info = await item.query_selector(":scope > .inr.right")
@@ -192,7 +191,13 @@ async def run_crawler():
         github_sheet = gc.open_by_key(target_spreadsheet_id).worksheet(worksheet_name)
         for r in github_sheet.get_all_records():
             if r.get("ID"):
-                existing_titles_dict[str(r["ID"])] = [r.get(f"{c}_{i}", "") for c in ['A_정석', 'B_타겟', 'C_혜택', 'D_감성'] for i in [1,2,3]]
+                # 캐시 칼럼 바인딩 구조를 A_정석_1, 2, 3 순서에 일치시킴
+                existing_titles_dict[str(r["ID"])] = [
+                    r.get("A_정석_1", ""), r.get("A_정석_2", ""), r.get("A_정석_3", ""),
+                    r.get("B_타겟_1", ""), r.get("B_타겟_2", ""), r.get("B_타겟_3", ""),
+                    r.get("C_혜택_1", ""), r.get("C_혜택_2", ""), r.get("C_혜택_3", ""),
+                    r.get("D_감성_1", ""), r.get("D_감성_2", ""), r.get("D_감성_3", "")
+                ]
         print(f"✅ 기수집 마스터 캐시 데이터 {len(existing_titles_dict)}개 로드 완료.")
     except:
         print("⚠️ 기존 시트 로드 패스 (시트가 비어있거나 최초 실행일 수 있음).")
@@ -216,18 +221,34 @@ async def run_crawler():
                 print(f"🔄 [{idx}/{len(target_tasks)}] {task['sheet_region']} 스크래핑 진행 중...")
                 await page.goto(task["url"], wait_until="domcontentloaded", timeout=25000)
                 
+                # 🛡️ [안정성 강화] 상품 개수가 렌더링될 때까지 최대 10초 명시적 대기
+                try:
+                    await page.wait_for_selector(".option_wrap.result .count em", timeout=10000)
+                except Exception:
+                    pass
+
                 total_count = 20
                 count_element = await page.query_selector(".option_wrap.result .count em")
                 if count_element and (await count_element.inner_text()).strip().isdigit():
                     total_count = int((await count_element.inner_text()).strip())
+                    print(f"   ↳ 🎯 총 상품 수 동기화: [{total_count}개]")
 
-                for _ in range((total_count - 1) // 20 if total_count > 20 else 0):
-                    await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                    await asyncio.sleep(1.0)
+                needed_scrolls = (total_count - 1) // 20 if total_count > 20 else 0
+                if needed_scrolls > 0:
+                    for _ in range(needed_scrolls):
+                        await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                        await asyncio.sleep(1.2)
+                        # 🔄 [보완] 레이지 로드 컴포넌트 트리거를 위한 흔들기 스크롤
+                        await page.evaluate("window.scrollTo(0, document.body.scrollHeight - 300)")
+                        await asyncio.sleep(0.2)
+                        await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                
+                # ⏳ 스크롤 완료 후 DOM 트리가 완전히 안착될 수 있도록 최종 대기 시간 부여
+                await asyncio.sleep(1.5)
 
                 final_items = await page.query_selector_all(".prod_list_wrap ul.type > li")
+                print(f"   ↳ 📦 타겟 엘리먼트 {len(final_items)}개 파싱 단계 진입.")
                 
-                # 🌟 [정밀 수정구역] 인자 개수를 매개변수 선언부와 정확하게 4개로 일치시킴
                 batch_results = await asyncio.gather(*[
                     scrape_single_product_elements(item, task["sheet_region"], task["sheet_airport"], task["url"]) 
                     for item in final_items
@@ -263,7 +284,14 @@ async def run_crawler():
         p_id = item["ID"]
         if p_id in existing_titles_dict and all(str(t).strip() for t in existing_titles_dict[p_id]):
             t = existing_titles_dict[p_id]
-            final_synced_products_dict[p_id] = {**item, **{f"{c}_{i}": t[idx] for idx, (c, i) in enumerate([(concepts, idx_num) for concepts in ['A_정석', 'B_타겟', 'C_혜택', 'D_감성'] for idx_num in [1, 2, 3]])}}
+            # 정확한 시트 컬럼 맵으로 복구하여 언팩 연산 최적화
+            final_synced_products_dict[p_id] = {
+                **item,
+                "A_정석_1": t[0], "A_정석_2": t[1], "A_정석_3": t[2],
+                "B_타겟_1": t[3], "B_타겟_2": t[4], "B_타겟_3": t[5],
+                "C_혜택_1": t[6], "C_혜택_2": t[7], "C_혜택_3": t[8],
+                "D_감성_1": t[9], "D_감성_2": t[10], "D_감성_3": t[11]
+            }
         else:
             needed_llm_products.append(item)
 
@@ -297,7 +325,7 @@ async def run_crawler():
                 final_synced_products_dict[item["ID"]] = item
 
     # =======================================================================
-    # 🌟 [STAGE 4] 구글 마스터 시트 원샷 대동기화 적재
+    # 🌟 [4단계] 구글 마스터 시트 원샷 대동기화 적재
     # =======================================================================
     if final_synced_products_dict:
         print("\n🚀 [STAGE 4] 구글 마스터 시트 동기화 업데이트 시작...")
