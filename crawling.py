@@ -13,10 +13,10 @@ from openai import AsyncOpenAI
 openai_client = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY", "YOUR_LOCAL_API_KEY"))
 SPREADSHEET_ID = "1mH51VHs4y0FgClkUBvZgw7oY3Yv7gQBA_a3um9uhX0I"
 
-# 💡 [교정] 총 5개 콘셉트 x 3개씩 = 총 15개 타이틀 마스터 컬럼 완벽 정의
+# 총 5개 콘셉트 x 3개씩 = 총 15개 타이틀 마스터 컬럼 정의
 CONCEPTS = ['A', 'B', 'C', 'D', 'E']
 NUMS = [1, 2, 3]
-TITLE_COLUMNS = [f"{c}_{n}" for c in CONCEPTS for n in NUMS]  # A_1 ~ E_3 총 15개 컬럼
+TITLE_COLUMNS = [f"{c}_{n}" for c in CONCEPTS for n in NUMS]  # A_1 ~ E_3 총 15개
 
 
 # ==========================================
@@ -31,83 +31,72 @@ def get_gspread_client():
 
 
 # ==========================================
-# [함수 2] ⚡ 완료: 5대 콘셉트 x 3개 (총 15개) 초고속 병렬 배치 LLM 타이틀 생성기
+# [함수 2] ⚡ 교정: 단일 상품 초고속 비동기 LLM 타이틀 생성기
 # ==========================================
-async def generate_naver_titles_batch_llm(products_list, semaphore):
+async def generate_naver_titles_llm(p, semaphore):
     """
-    비동기 세마포어(Semaphore) 제어를 통해 분당 제한(RPM)을 방어하면서,
-    5개 상품의 특성을 완벽히 분리하여 15대 타이틀을 병렬로 생성합니다.
+    단일 상품 1개에 완벽히 몰입하여 등급별 의무 반영 키워드를 매핑한 
+    15대 타이틀 조합을 생성합니다. (비동기 세마포어로 동시 호출 제어)
     """
-    async with semaphore:  # 동시 요청 가동 개수 제한 셔터
-        input_items_text = ""
-        for p in products_list:
-            departure = f"지정 출발공항: {p['출발공항']} (반드시 상품명 맨 앞에 '[{p['출발공항']}출발]' 형식으로 고정 배치할 것)" if p['출발공항'] != "없음" else "지정 출발공항: 없음 (★주의: 상품명 맨 앞에 어떠한 출발 관련 문구도 절대 넣지 말고 곧바로 지역명부터 시작할 것)"
-            
-            input_items_text += f"""
-            - [상품 식별 ID]: {p['ID']}
-              원본 상품명: {p['상품명']}
-              여행 지역: {p['지역']}
-              가격/금액: {p['가격']:,}원
-              {departure}
-            --------------------------------------"""
+    async with semaphore:
+        departure = f"지정 출발공항: {p['출발공항']} (반드시 상품명 맨 앞에 '[{p['출발공항']}출발]' 형식으로 고정 배치할 것)" if p['출발공항'] != "없음" else "지정 출발공항: 없음 (★주의: 상품명 맨 앞에 어떠한 출발 관련 문구도 절대 넣지 말고 곧바로 지역명부터 시작할 것)"
+        
+        # 💡 단일 연산이므로 등급 콘텍스트를 프롬프트에 더 강력하고 명확하게 바인딩 가능
+        price_grade = "세이브" if "[세이브]" in p['상품명'] else ("스탠다드" if "[스탠다드]" in p['상품명'] else ("프리미엄" if "[프리미엄]" in p['상품명'] else "일반"))
+        
+        grade_rule = ""
+        if price_grade == "세이브":
+            grade_rule = "- 현재 상품 등급: [세이브] ➡️ '세이브'라는 글자는 제외하고, 대신 [실속형], [가성비추천], [합리적플랜], [부담없는] 명사 필수 포함!"
+        elif price_grade == "스탠다드":
+            grade_rule = "- 현재 상품 등급: [스탠다드] ➡️ '스탠다드'라는 글자는 제외하고, 대신 [핵심일정], [완벽구성], [알찬여행], [밸런스추천] 명사 필수 포함!"
+        elif price_grade == "프리미엄":
+            grade_rule = "- 현재 상품 등급: [프리미엄] ➡️ '프리미엄'이라는 글자는 제외하고, 대신 [노쇼핑], [노팁], [노옵션], [자유시간포함], [전일정5성숙소] 명사 필수 포함!"
 
         prompt = f"""
 당신은 네이버 쇼핑 검색 최적화(SEO) 및 소비자 심리를 꿰뚫는 초일류 퍼포먼스 마케팅 카피라이팅 전문가입니다.
-제공된 여러 개의 여행 상품 데이터 목록을 보고, 가이드라인을 완벽히 준수하는 5가지 서로 다른 마케팅 콘셉트의 상품명을 각각 3개씩(총 15개) 생성하여 매핑하세요.
+제공된 단 하나의 여행 상품 데이터를 바탕으로, 가이드라인을 완벽히 준수하는 5가지 서로 다른 마케팅 콘셉트의 상품명을 각각 3개씩(총 15개) 생성하세요.
 
-[🔥 쥐약 경고: 무지성 복사 붙여넣기 절대 금지]
-입력된 상품 목록은 각각 금액, 등급, 세부 옵션이 완전히 다른 '독립된 상품'들입니다. 
-단지 지역명이 유사하다는 이유로 첫 번째 상품의 결과를 다른 ID에 복사 붙여넣기 하거나, 유사한 문구를 무지성으로 돌려막기 하는 행위는 절대 금지합니다. 각 [상품 식별 ID]별로 완전히 차별화된 독창적인 키워드 셋을 창조하세요.
+[입력 상품 데이터]
+- 상품 식별 ID: {p['ID']}
+- 원본 상품명: {p['상품명']}
+- 여행 지역: {p['지역']}
+- 가격/금액: {p['가격']:,}원
+{departure}
+{grade_rule}
 
-[💎 중요: 상품 등급별 키워드 의무 반영 규칙]
-입력 데이터의 '원본 상품명'에 포함된 상품 등급별 괄호 문구([세이브], [스탠다드], [프리미엄])를 완벽히 파악하여, 생성되는 모든 상품명(A~E 전 콘셉트 공통)에 아래 지정된 마케팅 키워드를 반드시 자연스럽게 녹여내세요. (단, 세이브, 스탠다드, 프리미엄이라는 영문 단어 자체는 상품명에 노출 금지)
-1. 원본 상품명에 '[세이브]'가 포함된 경우: 
-   - [실속형], [가성비추천], [합리적플랜], [부담없는] 등 경제성과 실속을 전면 강조하는 명사 키워드를 조합하세요.
-2. 원본 상품명에 '[스탠다드]'가 포함된 경우:
-   - [핵심일정], [완벽구성], [알찬여행], [밸런스추천] 등 일정의 탄탄함과 균형 잡힌 구성을 강조하는 키워드를 조합하세요.
-3. 원본 상품명에 '[프리미엄]'가 포함된 경우:
-   - [노쇼핑], [노팁], [노옵션], [자유시간포함], [전일정5성숙소] 등 가장 편안하고 고급스러운 혜택성 키워드를 전면에 배치하세요.
-
-[입력 상품 목록]
-{input_items_text}
-
-[❌ 전 콘셉트 공통 절대 금지 가이드라인]
-1. 글자 수 엄수: 모든 상품명은 공백 포함 최소 30자 ~ 최대 45자 사이로 구성한다. (50자 절대 초과 금지)
-2. 해시태그 문구 날것 노출 금지: '#' 기호나 해시태그 형태를 상품명에 그대로 노출하는 것을 절대 금지한다. (ex: #노쇼핑 -> 노쇼핑 포함, #5성호텔 -> 5성급호텔숙박 형태로 매끄럽게 가공할 것)
-3. 중복 제거: 단일 상품명 내부에서 동일한 단어(ex: 방콕, 여행, 패키지 등)가 2회 이상 중복 나열되는 것을 절대 금지한다.
-4. 정제성: '신상품', '세이브', '특가', '대박', '★' 같은 홍보성 문구나 특수문자는 절대 포함하지 않는다.
-5. 출발지 조건 규칙: [지정 출발공항]이 '없음'일 경우 '기본출발' 등을 임의로 조작하지 말고 무조건 곧바로 지역명/브랜드명으로 시작한다.
-6. 결과물 간 상호 중복 엄금: 한 상품 내에서 생성되는 15개의 상품명은 조사나 어순만 바꾼 수준이 아니라 완전히 다른 키워드 조합을 가져야 한다.
+[❌ 절대 금지 가이드라인]
+1. 글자 수 엄수: 모든 상품명은 공백 포함 최소 35자 ~ 최대 45자 사이로 구성한다. (50자 절대 초과 금지)
+2. 해시태그 날것 노출 금지: '#' 기호나 해시태그 형태를 그대로 노출하지 말고 명사구 문장으로 가공할 것. (ex: #노쇼핑 -> 노쇼핑포함)
+3. 중복 제거: 단일 상품명 내부에서 동일한 단어가 2회 이상 중복 나열되는 것을 절대 금지한다.
+4. 정제성: '신상품', '특가', '대박', '★' 같은 홍보성 문구나 특수문자는 절대 포함하지 않는다.
+5. 결과물 간 상호 중복 엄금: 생성되는 15개의 상품명은 완전히 다른 키워드 조합을 가져야 한다.
 
 [🎯 콘셉트별 상세 생성 및 결합 규칙]
-모든 타이틀은 문장이 아닌 명사구 띄어쓰기 조합으로 30자~45자 사이를 채우세요.
+모든 타이틀은 문장이 아닌 명사구 띄어쓰기 조합으로 35자~45자 사이를 채우세요.
 ■ 콘셉트 A (정석 SEO형 - 3개): 핵심 조건 위주의 실용적 명사 나열 조합. (3개 간 키워드 배치 순서를 다르게 뒤섞을 것)
 ■ 콘셉트 B (타겟/상황형 - 3개): 타겟 키워드를 3개가 각각 다르게 선택 (부모님 효도여행, 아이동반 가족여행, 부부기념 여행 등)
 ■ 콘셉트 C (혜택/USP형 - 3개): 소비자가 직관적으로 이득을 느끼는 등급별 혜택(전일정식사제공, 자유시간확보, 특식포함 등) 명사화 강조.
 ■ 콘셉트 D (감성/트렌디형 - 3개): 요즘뜨는핫플, 인생샷명소, 감성힐링스팟 등 감성 단어가 겹치지 않게 분산.
-■ 콘셉트 E (기본 대안형 - 3개): 원본 상품명의 원형 직관성을 존중하되 명사 배열과 SEO 키워드를 깔끔하게 가다듬은 기본 대안 조합.
+■ 콘셉트 E (기본 대안형 - 3개): 원본 상품명의 핵심 구조를 보존하되 명사 배열을 SEO에 맞게 다듬은 대안 조합.
 
-반드시 요청한 모든 [상품 식별 ID]가 완벽히 포함된 구조화된 JSON 오브젝트 포맷으로만 응답하세요. 다른 설명은 전면 금지합니다.
+반드시 아래 규격의 JSON 오브젝트 포맷으로만 응답하세요. 다른 설명은 전면 금지합니다.
+{{
+  "A_1": "...", "A_2": "...", "A_3": "...",
+  "B_1": "...", "B_2": "...", "B_3": "...",
+  "C_1": "...", "C_2": "...", "C_3": "...",
+  "D_1": "...", "D_2": "...", "D_3": "...",
+  "E_1": "...", "E_2": "...", "E_3": "..."
+}}
 """
-        
-        properties_schema = {}
-        for p in products_list:
-            properties_schema[p['ID']] = {
-                "type": "object",
-                "properties": {col: {"type": "string"} for col in TITLE_COLUMNS},
-                "required": TITLE_COLUMNS,
-                "additionalProperties": False
-            }
-
         json_schema_format = {
             "type": "json_schema",
             "json_schema": {
-                "name": "naver_fifteen_titles_batch_schema",
+                "name": "naver_fifteen_titles_single_schema",
                 "strict": True,
                 "schema": {
                     "type": "object",
-                    "properties": properties_schema,
-                    "required": [p['ID'] for p in products_list],
+                    "properties": {col: {"type": "string"} for col in TITLE_COLUMNS},
+                    "required": TITLE_COLUMNS,
                     "additionalProperties": False
                 }
             }
@@ -121,12 +110,12 @@ async def generate_naver_titles_batch_llm(products_list, semaphore):
                     {"role": "user", "content": prompt}
                 ],
                 response_format=json_schema_format,
-                temperature=0.5
+                temperature=0.6  # 창의성을 주어 완전 다채로운 카피 유도
             )
-            return json.loads(response.choices[0].message.content)
+            return p['ID'], json.loads(response.choices[0].message.content)
         except Exception as e:
-            print(f"❌ LLM 배치 타이틀 생성 중 에러 발생: {e}")
-            return {}
+            print(f"❌ LLM 타이틀 생성 중 에러 발생 (ID: {p['ID']}): {e}")
+            return p['ID'], {}
 
 
 # ==========================================
@@ -136,9 +125,7 @@ async def run_pipeline():
     gc = get_gspread_client()
     doc = gc.open_by_key(SPREADSHEET_ID)
     
-    # -------------------------------------------------------------
     # 1. 구글 스프레드시트에서 타겟 URL 리스트 가져오기
-    # -------------------------------------------------------------
     print("📥 [1단계] 타겟 상품리스트 URL 로드 중...")
     target_rows = doc.worksheet("상품리스트").get_all_values()[1:]
     target_tasks = []
@@ -155,9 +142,7 @@ async def run_pipeline():
             
     print(f"✅ 총 {len(target_tasks)}개의 크롤링 타겟 URL을 확보했습니다.")
 
-    # -------------------------------------------------------------
     # 2. URL 리스트 순회 및 전수 크롤링 (Playwright)
-    # -------------------------------------------------------------
     print("\n🕵️ [2단계] 전수 크롤링 및 실시간 스크롤 로딩 시작...")
     crawled_raw_products = []
     
@@ -243,30 +228,24 @@ async def run_pipeline():
     df_new = pd.DataFrame(crawled_raw_products)
     print(f"✅ 크롤링 전수 완료: 현재 웹상에 살아있는 상품 총 {len(df_new)}개 수집됨.")
 
-    # -------------------------------------------------------------
     # 3~5. 데이터 대조 연산 (중복 제거 및 최신 마스터셋 확정)
-    # -------------------------------------------------------------
     print("\n📊 [3~5단계] 최신화 연산 진행 (중복 제거 및 마스터 정제)...")
     df_final = df_new.drop_duplicates(subset=["ID"]).copy()
 
-    # -------------------------------------------------------------
-    # 💡 5.5단계: [초고속 병렬 레이어] 스마트 증분 매핑 및 비동기 배치 연산
-    # -------------------------------------------------------------
+    # 💡 5.5단계: [초고속 병렬 레이어] 스마트 증분 매핑 및 비동기 개별 연산
     target_s_id = os.environ.get("TARGET_SPREADSHEET_ID")
     worksheet_name = "github"
     
-    # 💡 신규 타이틀 15개 빈 컬럼 일괄 확장 생성
     for col in TITLE_COLUMNS:
         df_final[col] = ""
 
-    # ⏳ [전략 1] 스마트 증분 업데이트: 기존 시트에 15개 컬럼이 완벽히 연산된 데이터 재활용
+    # ⏳ [전략 1] 스마트 증분 업데이트: 기존 시트 재활용
     if target_s_id:
         try:
             target_doc = gc.open_by_key(target_s_id)
             old_records = target_doc.worksheet(worksheet_name).get_all_records()
             if old_records:
                 df_old = pd.DataFrame(old_records)
-                # 💡 15개 마스터 컬럼이 기존 시트에 완벽히 존재하는지 정밀 대조 체크
                 if all(col in df_old.columns for col in ["ID"] + TITLE_COLUMNS):
                     df_old_titles = df_old[["ID"] + TITLE_COLUMNS].drop_duplicates(subset=["ID"])
                     
@@ -278,56 +257,41 @@ async def run_pipeline():
                     ).fillna("")
                     print("✅ [스마트 증분] 기존 적재된 15대 콘셉트 타이틀 매핑 성공 및 LLM 차단 보전 완료.")
         except Exception as e:
-            print(f"ℹ️ 기존 적재 시트 대조 패스 (신규 적재 혹은 시트 데이터 양식 상이): {e}")
+            print(f"ℹ️ 기존 적재 시트 대조 패스: {e}")
 
-    # ⚡ [전략 2] 비동기 병렬 배치 처리: 15개 타이틀 중 첫 컬럼(A_1)이 비어 있는 신규 행만 동시 호출
+    # ⚡ [전략 2] 1:1 개별 비동기 병렬 처리: 타이틀이 비어 있는 신규 행만 추출
     is_new_product = (df_final["A_1"] == "") | (df_final["A_1"].isna())
     df_need_llm = df_final[is_new_product].copy()
     
-    print(f"🚀 [병렬 배치 연산] 총 {len(df_final)}개 상품 중 15대 타이틀 신규 생성 상품: {len(df_need_llm)}개")
+    print(f"🚀 [초고속 1:1 병렬 연산] 총 {len(df_final)}개 상품 중 신규 연산 대상 상품: {len(df_need_llm)}개")
 
     if len(df_need_llm) > 0:
-        batch_size = 5
         records_to_llm = df_need_llm.to_dict(orient="records")
         
-        # 동시 호출 제어 세마포어 (최대 3개 배치 즉, 신규 상품 15개 분량을 동시에 병렬 연산)
-        sem = asyncio.Semaphore(3)
+        # 💡 동시 호출 제한 세마포어 (한 번에 최대 15개 상품을 동시에 무제한 병렬 연산 요청)
+        sem = asyncio.Semaphore(15)
         
-        tasks = []
-        chunks_order = []
+        # 5개씩 묶지 않고, 상품 1개씩 단독 태스크로 전부 예약
+        tasks = [generate_naver_titles_llm(p, sem) for p in records_to_llm]
         
-        for i in range(0, len(records_to_llm), batch_size):
-            chunk = records_to_llm[i:i+batch_size]
-            chunks_order.append(chunk)
-            # 동시 대기 큐에 태스크 예약 생성
-            tasks.append(generate_naver_titles_batch_llm(chunk, sem))
-            
-        print(f"🔗 총 {len(tasks)}개의 묶음 배치를 결합하여 OpenAI 서버로 멀티태스킹 발송을 시작합니다...")
+        print(f"🔗 총 {len(tasks)}개의 상품을 각각 개별 독립 프롬프트로 분할하여 OpenAI 서버로 동시 발송합니다...")
         
-        # 예약된 모든 비동기 LLM 배치를 한 번에 병렬로 가동하고 취합 (속도 400% 이상 단축)
-        batch_results_list = await asyncio.gather(*tasks)
+        # 1:1로 쪼개진 태스크들을 병렬로 한 방에 실행 (기다리는 지연 시간이 한꺼번에 압축됨)
+        llm_results = await asyncio.gather(*tasks)
         
-        print("📥 모든 병렬 연산 응답 수신 완료! 데이터프레임 고속 정렬 매핑을 시작합니다.")
+        print("📥 모든 독립 연산 응답 수신 완료! 데이터프레임 매핑을 시작합니다.")
         
-        # 취합 완료된 병렬 묶음 데이터를 판다스에 고속 업데이트
-        for chunk, batch_result in zip(chunks_order, batch_results_list):
-            if not batch_result:
+        # 딕셔너리 형태로 변환 후 매핑
+        for p_id, res in llm_results:
+            if not res:
                 continue
-            for product in chunk:
-                p_id = product["ID"]
-                if p_id in batch_result:
-                    res = batch_result[p_id]
-                    idx = df_final[df_final["ID"] == p_id].index[0]
-                    # 15개 컬럼 루프 매핑
-                    for col in TITLE_COLUMNS:
-                        df_final.at[idx, col] = res.get(col, "[Error]").strip()
+            idx = df_final[df_final["ID"] == p_id].index[0]
+            for col in TITLE_COLUMNS:
+                df_final.at[idx, col] = res.get(col, "[Error]").strip()
 
-    # -------------------------------------------------------------
     # 6. 지정된 단일 구글 스프레드시트 적재 (Overwrite)
-    # -------------------------------------------------------------
     print(f"\n💾 [6단계] 최종 데이터 적재 준비 (총 {len(df_final)}개 상품)...")
     
-    # 💡 15개 전체 컬럼 배치 순서 설정 완료 (총 22개 컬럼 포맷)
     column_order = ["ID", "상품명", "가격", "URL", "이미지URL", "지역", "출발공항"] + TITLE_COLUMNS
     df_final = df_final[column_order].fillna("")
 
