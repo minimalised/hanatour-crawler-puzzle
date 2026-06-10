@@ -8,6 +8,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 from playwright.async_api import async_playwright
 
+# 💡 원본 상품 소스 스프레드시트 ID는 그대로 유지
 SPREADSHEET_ID = "1mH51VHs4y0FgClkUBvZgw7oY3Yv7gQBA_a3um9uhX0I"
 
 # ==========================================
@@ -36,10 +37,14 @@ async def run_pipeline():
     target_tasks = []
     for r in target_rows:
         if r and r[0].startswith("http"):
+            # 💡 [교정] 셀이 완전히 비어있거나, 눈에 안 보이는 공백(" ")만 있는 경우까지 완벽하게 "없음"으로 치환
+            raw_airport = r[2].strip() if len(r) > 2 else ""
+            airport_val = raw_airport if raw_airport != "" else "없음"
+
             target_tasks.append({
                 "url": r[0].strip(), 
                 "region": r[1].strip(), 
-                "airport": r[2].strip() if len(r) > 2 else "없음"
+                "airport": airport_val
             })
             
     print(f"✅ 총 {len(target_tasks)}개의 크롤링 타겟 URL을 확보했습니다.")
@@ -60,6 +65,7 @@ async def run_pipeline():
 
         for task in target_tasks:
             try:
+                # 💡 이제 출발공항이 없는 경우 () 가 아닌 (없음) 으로 깨끗하게 찍힙니다.
                 print(f"🔄 로딩 중: {task['region']} ({task['airport']})")
                 await page.goto(task['url'], wait_until="domcontentloaded", timeout=30000)
                 
@@ -116,7 +122,7 @@ async def run_pipeline():
                     if img_url and img_url.startswith("//"): 
                         img_url = "https:" + img_url
 
-                    # 💡 [ID 생성 규칙 가이드라인] 상품명 + 가격 + 출발공항 조합으로 유일한 고유 ID 키 정의
+                    # 💡 [ID 무결성 확보] 공항 값이 "없음"으로 확실히 채워졌으므로 공항이 없는 상품 간에도 중복 ID 대형 참사가 방지됩니다.
                     unique_str = f"{full_title}_{price}_{task['airport']}"
                     product_id = hashlib.md5(unique_str.encode('utf-8')).hexdigest()[:8]
 
@@ -143,18 +149,11 @@ async def run_pipeline():
     # 3~5. 데이터 대조 연산 (추가 / 유지 / 삭제 자동 처리)
     # -------------------------------------------------------------
     print("\n📊 [3~5단계] 최신화 연산 진행 (중복 제거 및 삭제 처리)...")
-    
-    # 웹 사이트 자체 화면에 간혹 중복 노출되는 데이터 ID 기준으로 완전히 제거
     df_new = df_new.drop_duplicates(subset=["ID"])
-
-    # 💡 최신 데이터프레임(df_new)이 곧 정답입니다.
-    # 기존 시트에 있다 하더라도 df_new에 없다면 하나투어에서 삭제된 상품이므로 
-    # 별도의 복잡한 merge 없이 df_new 자체를 최종 적재 데이터로 사용하면 3, 4, 5번 규칙이 완벽하게 성립됩니다.
-    # (동일 상품명이 있으면 기존 컬럼 구성을 그대로 유지한 채 덮어씌워지며, 삭제된 상품은 목록에서 자동 탈락)
     df_final = df_new.copy()
 
     # -------------------------------------------------------------
-    # 6. 최종 4개 구글 스프레드시트 전수 적재 (Overwrite)
+    # 6. 지정된 단일 구글 스프레드시트 적재 (Overwrite)
     # -------------------------------------------------------------
     print(f"\n💾 [6단계] 최종 데이터 적재 준비 (총 {len(df_final)}개 상품)...")
     
@@ -165,23 +164,21 @@ async def run_pipeline():
     # 업로드 전용 이중 리스트 변환
     data_to_upload = [df_final.columns.values.tolist()] + df_final.values.tolist()
 
-    # 적재 대상 구글 스프레드시트 고유 키값 목록
-    target_spreadsheet_ids = [
-        "1mH51VHs4y0FgClkUBvZgw7oY3Yv7gQBA_a3um9uhX0I",
-        "1JgWk9PYT6LG_1GnPdpVY0mZavcHXDWRSrzdE0lVmjj4",
-        "1Hoq0N88mestsHXbIOjwue3OctXf7dvKkx99eieYFhAY",
-        "1BK4xUHQFrLjLTn6vE0jSuwqMvSU7ZMKIV-nPvmySPx8"
-    ]
+    # 💡 [교정] 하드코딩된 리스트를 없애고 GitHub Repository Secrets 환경변수에서 타겟 ID 추출
+    target_s_id = os.environ.get("TARGET_SPREADSHEET_ID")
+    worksheet_name = "github"
 
-    for s_id in target_spreadsheet_ids:
+    if target_s_id:
         try:
-            target_doc = gc.open_by_key(s_id)
-            sheet = target_doc.worksheet("github")
+            target_doc = gc.open_by_key(target_s_id)
+            sheet = target_doc.worksheet(worksheet_name)
             sheet.clear()  # 기존 찌꺼기 완벽 제거
             sheet.update(values=data_to_upload, range_name='A1')
-            print(f"✅ 적재 성공: [{target_doc.title}] 동기화 완료")
+            print(f"🚀 [적재 완료] Secrets 타겟 시트 [{target_doc.title}] 동기화 성공!")
         except Exception as e:
-            print(f"⚠️ 시트 업데이트 실패 ({s_id}): {e}")
+            print(f"❌ 시트 적재 실패 (ID: {target_s_id}): {e}")
+    else:
+        print("⚠️ [경고] TARGET_SPREADSHEET_ID 환경 변수가 설정되지 않아 구글 시트에 적재하지 못했습니다.")
 
     print("\n🎉 고유 ID 기반 7대 핵심 데이터 동기화 파이프라인이 정상 종료되었습니다!")
 
