@@ -15,33 +15,35 @@ openai_client = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY", "YOUR_LOCAL
 
 async def generate_naver_titles_llm(data):
     """
-    GPT-4o-mini를 활용하여 4가지 콘셉트별로 3개씩, 총 12개의 마케팅 최적화 상품명을 생성합니다.
-    자체 결과물 중복 발견 시 최대 3회까지 다양성을 높여 자동 재시도(Retry)합니다.
+    [요구사항 3, 3-1, 4] 
+    GPT-4o-mini를 활용하여 [세이브/스탠다드/프리미엄] 등급별 차별화 수식어를 붙이고,
+    12개 결과물 간에 최종 중복이 없도록 엄격하게 재조합합니다.
     """
     if data['departure_airport'] != "없음":
         departure_context = f"- 지정 출발공항: {data['departure_airport']} (반드시 상품명 맨 앞에 '{data['departure_airport']}' 형식으로 고정 배치할 것)"
     else:
         departure_context = "- 지정 출발공항: 없음 (★주의: 상품명 맨 앞에 '[기본출발]', '[기본출발지]', '[출발지없음]' 등 어떠한 출발 관련 문구도 절대 넣지 말고, 곧바로 '지역명'부터 시작할 것)"
 
+    # 🌟 [요구사항 3-1, 4 완벽 반영] 등급별 고유 수식어 강제 및 최종 중복 엄금 지침
     prompt = f"""
 당신은 네이버 쇼핑 검색 최적화(SEO) 및 소비자 심리를 꿰뚫는 초일류 퍼포먼스 마케팅 카피라이팅 전문가입니다.
 제공된 여행 상품 데이터를 바탕으로, 가이드라인을 완벽히 준수하는 4가지 서로 다른 마케팅 콘셉트의 상품명을 각각 3개씩(총 12개) 생성하세요.
 
-[💎 중요: 상품 등급별 키워드 의무 반영 규칙]
-입력 데이터의 '원본 상품명'에 포함된 상품 등급별 괄호 문구를 파악하여, 생성되는 모든 상품명(A~D 전 콘셉트 공통)에 아래 키워드를 반드시 자연스럽게 녹여내세요.
-1. 원본 상품명에 '[세이브]'가 포함된 경우: 
-   - '세이브'라는 단어 자체는 쓰지 말고, 대신 [실속], [가성비추천], [합리적], [부담없는] 등 경제성과 실속을 전면 강조하는 명사 키워드를 조합하세요.
-2. 원본 상품명에 '[스탠다드]'가 포함된 경우:
-   - '스탠다드'라는 단어 대신 [핵심일정], [완벽구성], [알찬여행], [밸런스추천] 등 일정의 탄탄함과 균형 잡힌 구성을 강조하는 키워드를 조합하세요.
-3. 원본 상품명에 '[프리미엄]'이 포함된 경우:
-   - '프리미엄'이라는 단어 대신 [노쇼핑], [노팁], [노옵션], [자유시간포함], [전일정5성숙소] 등 소비자가 피로감을 느끼지 않고 가장 편안하고 고급스러운 혜택성 키워드를 전면에 배치하세요.
+[💎 요구사항 3-1: 상품 등급별 고유 수식어 반영 규칙]
+입력 데이터의 '원본 상품명'에 포함된 상품 등급별 괄호 문구를 파악하여, 생성되는 모든 상품명(A~D 전 콘셉트)에 아래의 다른 수식어를 붙여 등급과 가격 차이를 명확히 구분하세요.
+1. 원본 상품명에 '[세이브]'가 포함된 경우 (가성비 중심):
+   - 상품명 내부나 맨 뒤에 실속, 알뜰, 합리적 가격, 부담없는 등의 경제적 혜택 수식어를 반드시 포함하세요. (ex: 가성비추천, 실속패키지, 합리적선택)
+2. 원본 상품명에 '[스탠다드]'가 포함된 경우 (밸런스 중심):
+   - 상품명 내부나 맨 뒤에 핵심일정, 알찬구성, 완벽케어, 베스트셀러 등의 탄탄한 구성을 뜻하는 수식어를 반드시 포함하세요. (ex: 알찬구성, 밸런스추천, 핵심일정포함)
+3. 원본 상품명에 '[프리미엄]'이 포함된 경우 (고급/편안함 중심):
+   - 상품명 내부나 맨 뒤에 노쇼핑, 노팁, 노옵션, 자유시간, 5성호텔 등 가장 편안하고 품격 있는 최고급 혜택 수식어를 반드시 포함하세요. (ex: 노쇼핑노팁, 품격여행, 전일정오성급)
 
-[⚠️ 데이터 특징 및 상품 간 차별화 지침]
-현재 등록하려는 상품들은 지역명이 매우 유사합니다. 
-위의 등급별 가이드라인과 더불어 [원본 상품명] 내부에 포함된 고유 힌트 및 [핵심 설명], [추출 키워드]를 분석하여 해당 상품만의 고유 특징을 상품명에 녹여내어 다른 행의 상품들과 확실하게 차별화되도록 만드세요.
+[💎 요구사항 4: 최종 결과물 중복 제거 지침]
+- 유사한 상품명이 들어오더라도 최종 출력되는 12개의 상품명은 서로 어순이나 조사만 바꾼 수준이어서는 절대 안 됩니다.
+- 단어 조합과 핵심 카피를 완전히 다르게 재조합하여, 12개 결과물 간에 단 한 줄도 겹치지 않게 '최종 중복'을 완벽히 차단하세요.
 
 [입력 데이터]
-- 원본 상품명: {data['full_title']}  
+- 원본 상품명: {data['full_title']}  # 이 원본명 내부의 등급과 특화 키워드를 적극 분석할 것
 - 여행 지역: {data['region']}
 - 기간: {data['duration']}
 {departure_context}
@@ -51,15 +53,8 @@ async def generate_naver_titles_llm(data):
 [❌ 전 콘셉트 공통 절대 금지 가이드라인]
 1. 글자 수: 모든 상품명은 공백 포함 최소 30자 ~ 최대 45자 사이로 구성한다. (50자 절대 초과 금지)
 2. 중복 제거: 단일 상품명 내부에서 동일한 단어(ex: 방콕, 여행, 패키지 등)가 2회 이상 중복 나열되는 것을 절대 금지한다.
-3. 정제성: '신상품', '세이브', '특가', '대박', '★' 같은 홍보성 문구나 특수문자는 절대 포함하지 않는다.
-4. 출발지 조건 규칙: [지정 출발공항]이 '없음'일 경우 '기본출발' 등을 임의로 조작하지 말고 무조건 곧바로 지역명/브랜드명으로 시작한다.
-5. 결과물 간 상호 중복 엄금: 생성되는 12개의 상품명은 조사나 어순만 바꾼 수준이 아니라 완전히 다른 키워드 조합을 가져야 한다.
-
-[🎯 콘셉트별 상세 생성 규칙]
-■ 콘셉트 A (정석 SEO형 - 3개): 핵심 키워드 위주의 명사 나열 조합. (3개 간 키워드 배치 순서를 다르게 뒤섞을 것)
-■ 콘셉트 B (타겟/상황형 - 3개): 타겟 키워드를 3개가 각각 다르게 선택 (부모님 효도, 아이동반 등)
-■ 콘셉트 C (혜택/USP형 - 3개): 소비자가 직관적으로 이득을 느끼는 등급별 프리미엄 혜택 명사화 강조.
-■ 콘셉트 D (감성/트렌디형 - 3개): 요즘뜨는, 인생샷, 감성숙소 등 감성 단어가 겹치지 않게 분산.
+3. 정제성: '신상품', '세이브', '특가', '대박', '★' 같은 홍보성 문구나 특수문자는 절대 포함하지 않는다. (등급의 의미만 고유 수식어로 승화할 것)
+4. 출발지 조건 규칙: [지정 출발공항]이 '없음'일 경우 무조건 곧바로 지역명/브랜드명으로 시작한다.
 """
     
     json_schema_format = {
@@ -123,9 +118,10 @@ async def generate_naver_titles_llm(data):
     return tuple(titles_list)
 
 
-async def scrape_single_product_elements(item, target_region, target_airport, current_url, idx):
+async def scrape_single_product_elements(item, target_region, target_airport, current_url):
     """
-    [1단계 전용] 외부 브라우저 대기를 없애기 위해 오직 '웹 엘리먼트 순수 크롤링'만 수행합니다.
+    [요구사항 1, 2] 
+    지정된 URL에 들어가서 페이지에 구성된 '모든 상품 정보'를 누락 없이 긁어옵니다.
     """
     try:
         main_info = await item.query_selector(":scope > .inr.right")
@@ -141,8 +137,9 @@ async def scrape_single_product_elements(item, target_region, target_airport, cu
         price_raw = await price_el.inner_text() if price_el else "0"
         price = "".join(filter(str.isdigit, price_raw))
 
-        # 고유 ID 생성 (제목+가격+주소+순번)
-        unique_str = f"{full_title}_{price}_{current_url}_{idx}"
+        # 🌟 [상품 고유 ID 정의] 
+        # 링크 주소(URL)는 완벽히 배제하고, 오직 '원본상품명 + 가격' 조합으로만 상품의 고유 ID를 결정합니다.
+        unique_str = f"{full_title}_{price}"
         product_id = hashlib.md5(unique_str.encode()).hexdigest()[:8]
 
         pure_title_body = re.sub(r'\[.*?\]', '', full_title).strip()
@@ -262,7 +259,7 @@ async def run_crawler():
         print(f"⚠️ 기존 시트 로드 패스: {cache_error}")
 
     # =======================================================================
-    # 🌟 [1단계] 고속 웹 크롤링 스테이지 (GPT 대기 없음, 오직 순수 스크래핑만)
+    # 🌟 [요구사항 1, 2] 고속 웹 크롤링 스테이지 (모든 기획전의 상품 정보 수집)
     # =======================================================================
     print("\n⚡ [STAGE 1] 전체 기획전 URL 대상 고속 웹 스크래핑을 시작합니다...")
     raw_scraped_list = []
@@ -306,10 +303,9 @@ async def run_crawler():
 
                 final_items = await page.query_selector_all(".prod_list_wrap ul.type > li")
                 
-                # 병렬 스크래핑 태스크 빌드
                 tasks = [
-                    scrape_single_product_elements(item, target_region, target_airport, current_url, i)
-                    for i, item in enumerate(final_items)
+                    scrape_single_product_elements(item, target_region, target_airport, current_url)
+                    for item in final_items
                 ]
                 batch_results = await asyncio.gather(*tasks)
                 
@@ -323,22 +319,30 @@ async def run_crawler():
                 
         await browser.close()
 
-    print(f"📦 [STAGE 1 완료] 총 {len(raw_scraped_list)}개의 웹 상품 원본 데이터를 정상 수집했습니다.")
+    print(f"📦 [STAGE 1 완료] 총 {len(raw_scraped_list)}개의 웹 상품 엘리먼트를 정상 수집했습니다.")
 
     # =======================================================================
-    # 🌟 [2단계 & 3단계] 데이터 병목 정제 및 세션 분리형 LLM 조립 스테이지
+    # 🌟 [요구사항 4] 상품 내용 기준 중복 제거 스테이지 (URL 관여 금지)
     # =======================================================================
-    print("\n🤖 [STAGE 2 & 3] 기존 시트 비교 필터링 및 조건부 LLM 연산을 시작합니다...")
+    print("\n🧹 [STAGE 2] 오직 '상품 정보(ID)'를 기준으로 진짜 상품 중복을 필터링합니다...")
+    
+    df_raw = pd.DataFrame(raw_scraped_list)
+    
+    # 주소 URL은 무시하고 오직 상품의 알맹이(ID = 원본명+가격) 기준으로 중복을 완벽히 청소합니다.
+    before_count = len(df_raw)
+    df_raw = df_raw.drop_duplicates(subset=["ID"], keep="first")  # 🌟 링크 URL 조건 완벽 제거!
+    after_count = len(df_raw)
+    
+    clean_scraped_list = df_raw.to_dict(orient="records")
+    print(f"🧹 [청소 완료] 중복 노출되던 상품 {before_count - after_count}개 제거 ➡️ 최종 [{len(clean_scraped_list)}개] 고유 상품 확정.")
+
+    # =======================================================================
+    # 🌟 [요구사항 3, 3-1] 차별화 컨셉 재구성 및 순차적 LLM 연산 스테이지
+    # =======================================================================
+    print("\n🤖 [STAGE 3] 신규/누락 상품 대상 컨셉별 상품명 재구성 및 LLM 연산을 진행합니다...")
     
     final_synced_products = []
-    runtime_titles_dict = {}
     
-    # 중복 노출 상품 대량 유입 시 'URL' 기준 1차 청소 처리
-    df_raw = pd.DataFrame(raw_scraped_list)
-    df_raw = df_raw.drop_duplicates(subset=["URL"], keep="first")
-    clean_scraped_list = df_raw.to_dict(orient="records")
-    print(f"🧹 기획전 간 중복 노출되던 상품을 제외한 [{len(clean_scraped_list)}개] 고유 상품 최종 분석 개시.")
-
     for current_item in clean_scraped_list:
         p_id = current_item["ID"]
         f_title = current_item["원본상품명"]
@@ -347,19 +351,14 @@ async def run_crawler():
         is_cached = False
         titles = None
 
-        # 구글 시트에 완벽히 존재하며 공백이 없는 데이터인지 교차 체크
+        # 기존 마스터 시트에 이미 완료된 데이터가 완벽하게 존재하는지 체크
         if p_id in existing_titles_dict:
             sheet_titles = existing_titles_dict[p_id]
             if sheet_titles and all(str(t).strip() for t in sheet_titles):
                 titles = sheet_titles
                 is_cached = True
 
-        # 동일 회차 내 런타임 ID 캐시 디펜스
-        if not is_cached and p_id in runtime_titles_dict:
-            titles = runtime_titles_dict[p_id]
-            is_cached = True
-
-        # [핵심] 기존 상품 패스 및 신규/미완성 상품만 선별하여 GPT 호출
+        # 시트에 없거나 누락된 상품만 골라 차별화 지침에 따라 LLM 연산 수행
         if not is_cached or titles is None:
             print(f"✨ [LLM 연산 할당] {f_title} ({price}원)")
             ai_input_data = {
@@ -370,13 +369,10 @@ async def run_crawler():
                 "description": current_item["description"],
                 "hashtags": current_item["hashtags"]
             }
-            # 등급 키워드가 적용된 최적화 카피라이터 호출
             titles = await generate_naver_titles_llm(ai_input_data)
-            runtime_titles_dict[p_id] = titles
-            # OpenAI 가속 조절을 위한 0.1초 미세 딜레이
             await asyncio.sleep(0.1)
 
-        # 수집 및 AI 조합 결과 최종 융합
+        # 최종 데이터 구조 융합
         final_synced_products.append({
             "ID": p_id,
             "원본상품명": f_title,
@@ -393,10 +389,10 @@ async def run_crawler():
         })
 
     # =======================================================================
-    # 🌟 [4단계] 구글 마스터 시트 원샷 통적재 (API 할당량 429 에러 100% 차단)
+    # 🌟 [4단계] 구글 마스터 시트 원샷 대동기화 적재
     # =======================================================================
     if final_synced_products:
-        print("\n🚀 [STAGE 4] 구글 마스터 시트 원샷 동기화 업데이트 시작...")
+        print("\n🚀 [STAGE 4] 구글 마스터 시트 동기화 동시 적재 시작...")
         try:
             df_final = pd.DataFrame(final_synced_products)
             column_order = [
@@ -410,7 +406,7 @@ async def run_crawler():
 
             github_sheet.clear()
             github_sheet.update(values=data_to_upload, range_name='A1')
-            print(f"🎯 [최종 대동기화 성공] 마스터 Raw 시트 동기화 완료! (총 {len(df_final)}개 데이터 보존 및 동기화 적재)")
+            print(f"🎯 [최종 동기화 완료] 마스터 Raw 시트에 총 {len(df_final)}개의 고유 상품 정리가 끝났습니다.")
 
         except Exception as e:
             print(f"❌ 구글 시트 마스터 적재 치명적 오류: {e}")
