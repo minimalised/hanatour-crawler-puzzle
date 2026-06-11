@@ -1,4 +1,4 @@
-name: Daily Hanatour Crawling
+name: Daily Hanatour Crawling (Batch v2)
 
 on:
   workflow_dispatch:      # 수동 실행 버튼 활성화
@@ -13,18 +13,23 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # 1. 최신 asyncio 문법 지원을 위해 3.11 버전으로 지정
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.11'
 
+      # 2. 의존성 설치 및 컨테이너 내 내장 브라우저 호환성 설정
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           python -m pip install pandas gspread google-auth playwright playwright-stealth openai
-          python -m playwright install chromium
+          
+          # 컨테이너 환경에 이미 설치된 브라우저 바이너리를 파이썬과 링크해줍니다.
+          python -m playwright install-deps
 
-      - name: Run Hanatour New Crawler
+      # 3. 새 버전(crawling2.py) 실행
+      - name: Run Hanatour New Crawler v2
         env:
           GOOGLE_JSON_RAW: ${{ secrets.GOOGLE_JSON_RAW }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
