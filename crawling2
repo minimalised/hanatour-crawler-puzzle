@@ -13,27 +13,27 @@ from openai import AsyncOpenAI
 openai_client = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY", "YOUR_LOCAL_API_KEY"))
 
 # -------------------------------------------------------------
-# [디벨롭 2] 네이버 SEO 사후 검증 함수 (품질 향상)
+# [변경] 네이버 SEO 사후 검증 함수 (글자 수 기준: 30자 ~ 45자)
 # -------------------------------------------------------------
 def validate_naver_title(title):
     """네이버 쇼핑 상품명 가이드라인 만족 여부 검증"""
     if not title:
         return False
-    # 1. 글자 수 검증 (공백 포함 25자 이상 ~ 35자 이하)
-    if not (25 <= len(title) <= 35):
+    # 💡 글자 수 검증 조건 변경 (공백 포함 30자 이상 ~ 45자 이하)
+    if not (30 <= len(title) <= 45):
         return False
-    # 2. 단어 중복 검증 (띄어쓰기 기준 동일 단어 2회 이상 등장 금지)
+    # 단어 중복 검증 (띄어쓰기 기준 동일 단어 2회 이상 등장 금지)
     words = title.split()
     if len(words) != len(set(words)):
         return False
-    # 3. 금지 키워드 및 특수문자 검증
+    # 금지 키워드 및 특수문자 검증
     forbidden = ["특가", "대박", "신상품", "세이브", "★", "▼", "▲", "◆"]
     if any(f_word in title for f_word in forbidden):
         return False
     return True
 
 # -------------------------------------------------------------
-# [디벨롭 1 & 2] 대량 처리를 위한 프롬프트 생성 함수 (옵션 5개로 확장)
+# [변경] 프롬프트 생성 함수 (글자 수 가이드라인 30자 ~ 45자로 변경)
 # -------------------------------------------------------------
 def make_batch_prompt(data):
     if data['departure_airport'] != "없음":
@@ -53,7 +53,7 @@ def make_batch_prompt(data):
 - 추출 키워드: {data['hashtags']}
 
 [네이버 쇼핑 상품명 가이드라인]
-1. 글자 수: 공백 포함 최소 25자 ~ 최대 35자 사이로 구성한다. (35자 초과 절대 금지)
+1. 글자 수: 공백 포함 최소 30자 ~ 최대 45자 사이로 풍성하고 유연하게 구성한다. (30자 미만, 45자 초과 절대 금지)
 2. 중복 제거: 상품명 내부에서 동일한 단어(ex: 방콕, 여행, 패키지 등)가 2회 이상 중복 나열되는 것을 절대 금지한다.
 3. 정제성: '신상품', '세이브', '특가', '대박', '★' 같은 홍보성 문구나 특수문자는 절대 포함하지 않는다.
 4. 출발지 조건 규칙: 
@@ -71,7 +71,7 @@ def make_batch_prompt(data):
 }}"""
 
 # -------------------------------------------------------------
-# 기존 개별 수집 로직 (기존 유지하되 LLM 호출부만 제거)
+# 기존 개별 수집 로직
 # -------------------------------------------------------------
 async def process_single_product_raw(item, target_region, target_airport, current_url):
     try:
@@ -165,17 +165,17 @@ async def run_crawler():
                 "sheet_airport": row[2].strip() if len(row) > 2 and row[2].strip() else "없음"
             })
 
-    # 캐싱 데이터 로드
+    # 캐싱 데이터 로드 (github2에서 로드)
     existing_titles_dict = {}
     try:
-        github_sheet = source_doc.worksheet("github")
+        github_sheet = source_doc.worksheet("github2")
         for r in github_sheet.get_all_records():
             if r.get("ID"):
                 existing_titles_dict[str(r["ID"])] = [r.get(f"네이버_상품명_{i}", "") for i in range(1, 6)]
     except Exception:
-        print("⚠️ 기존 캐시가 없거나 비어있습니다. 전수 조사로 진행합니다.")
+        print("⚠️ 기존 github2 캐시가 없거나 비어있습니다. 전수 조사로 진행합니다.")
 
-    # 1단계: Playwright 고속 크롤링 (텍스트/정보 스크래핑만 수행)
+    # 1단계: Playwright 고속 크롤링
     raw_products = []
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
@@ -197,7 +197,7 @@ async def run_crawler():
     if not raw_products:
         print("ℹ️ 수집된 상품이 없습니다."); return
 
-    # 2단계: OpenAI Batch 요청 파일(.jsonl) 생성 (비용 50% 절감 핵심)
+    # 2단계: OpenAI Batch 요청 파일(.jsonl) 생성
     print(f"📦 총 {len(raw_products)}개 상품 중 신규 상품 LLM 배치 파일 생성 중...")
     batch_input_filename = "openai_batch_tasks.jsonl"
     
@@ -209,14 +209,12 @@ async def run_crawler():
             p_id = p["ID"]
             orig_title = p["원본상품명"]
             
-            # 이미 시트에 있거나, 이번 회차에 중복된 타이틀은 무시 (비용 중복 방지)
             if p_id in existing_titles_dict or orig_title in runtime_cache_check:
                 continue
                 
             runtime_cache_check[orig_title] = p_id
             has_new_request = True
             
-            # OpenAI Batch 포맷팅
             task_json = {
                 "custom_id": f"task_{p_id}",
                 "method": "POST",
@@ -247,7 +245,6 @@ async def run_crawler():
         job_id = batch_job.id
         print(f"⏳ 배치 작업 시작됨 (ID: {job_id}). 완료 상태를 모니터링합니다...")
         
-        # 주기적 상태 체크 루프 (보통 mini 모델은 수분 내로 완료됨)
         while True:
             status_check = await openai_client.batches.retrieve(job_id)
             if status_check.status == "completed":
@@ -264,9 +261,8 @@ async def run_crawler():
                         content_raw = res_data["response"]["body"]["choices"][0]["message"]["content"]
                         res_json = json.loads(content_raw)
                         
-                        # 5개 옵션 확보 및 유효성 검증
                         options = [res_json.get(f"option_{i}", "").strip() for i in range(1, 6)]
-                        # 실패한 상품명은 가시적으로 마스킹 처리하여 무결성 유지
+                        # 유연해진 30~45자 기준으로 검증 수행
                         validated_options = [opt if validate_naver_title(opt) else f"[⚠️가이드미달] {opt}" for opt in options]
                         
                         llm_results[c_id] = validated_options
@@ -277,7 +273,7 @@ async def run_crawler():
                 print(f"❌ OpenAI Batch 작업 실패 혹은 취소됨: {status_check.status}")
                 break
             else:
-                await asyncio.sleep(15) # 15초 간격 재확인
+                await asyncio.sleep(15)
     else:
         print("♻️ 모든 상품이 이미 기수집되어 캐시를 사용합니다. LLM을 호출하지 않습니다.")
 
@@ -287,16 +283,12 @@ async def run_crawler():
         p_id = p["ID"]
         orig_title = p["원본상품명"]
         
-        # 1순위: 이번에 새로 만든 LLM 결과
         if p_id in llm_results:
             t_list = llm_results[p_id]
-        # 2순위: 동일 회차 내 원본명 중복 캐시
         elif orig_title in runtime_cache_check and runtime_cache_check[orig_title] in llm_results:
             t_list = llm_results[runtime_cache_check[orig_title]]
-        # 3순위: 구글 시트에 기존 저장되어 있던 캐시
         elif p_id in existing_titles_dict:
             t_list = existing_titles_dict[p_id]
-            # 구버전(3개짜리) 대응용 패딩
             while len(t_list) < 5: t_list.append("")
         else:
             t_list = ["[미생성]"] * 5
@@ -328,7 +320,7 @@ async def run_crawler():
             sheet = doc.worksheet("github2")
             sheet.clear()
             sheet.update(values=[df.columns.values.tolist()] + df.values.tolist(), range_name='A1')
-            print(f"✅ 구글 시트 반영 완료 (상품 가짓수 5개 확장 버전)")
+            print(f"✅ 구글 시트 github2 반영 완료 (30~45자 가이드 5옵션 버전)")
         except Exception as e:
             print(f"❌ 시트 반영 실패: {e}")
 
