@@ -36,7 +36,7 @@ def validate_naver_title(title):
 # [변경] 프롬프트 생성 함수 (글자 수 가이드라인 30자 ~ 45자로 변경)
 # -------------------------------------------------------------
 def make_batch_prompt(data):
-    if data['departure_airport'] != "없음":
+    if data.get('departure_airport', "없음") != "없음":
         departure_context = f"- 지정 출발공항: {data['departure_airport']} (반드시 상품명 맨 앞에 '{data['departure_airport']}' 형식으로 고정 배치할 것)"
     else:
         departure_context = "- 지정 출발공항: 없음 (★주의: 상품명 맨 앞에 '[기본출발]', '[전국출발]' 등 어떠한 출발 관련 문구도 절대 넣지 말고, 곧바로 '지역명'부터 시작할 것)"
@@ -71,7 +71,7 @@ def make_batch_prompt(data):
 }}"""
 
 # -------------------------------------------------------------
-# 기존 개별 수집 로직 (버전1의 안정적인 추출 로직 적용)
+# 기존 개별 수집 로직 (출발공항 자동 매칭 및 방어 로직 이식)
 # -------------------------------------------------------------
 async def process_single_product_raw(item, target_region, target_airport, current_url):
     try:
@@ -81,6 +81,17 @@ async def process_single_product_raw(item, target_region, target_airport, curren
 
         title_el = await main_info.query_selector(".item_title")
         full_title = (await title_el.inner_text()).strip() if title_el else "제목 없음"
+
+        # 💡 [방어 코드 이식] 시트상 출발공항이 '없음'이거나 유실되어도 URL 및 타이틀에서 자동 매칭 및 보정
+        if target_airport == "없음" or not target_airport:
+            if "[청주출발]" in full_title or "depCityCd=CJJ" in current_url:
+                target_airport = "[청주출발]"
+            elif "[제주출발]" in full_title or "depCityCd=CJU" in current_url:
+                target_airport = "[제주출발]"
+            elif "[부산출발]" in full_title or "depCityCd=PUS" in current_url:
+                target_airport = "[부산출발]"
+            elif "[대구출발]" in full_title or "depCityCd=TAE" in current_url:
+                target_airport = "[대구출발]"
 
         price_el = await main_info.query_selector(".price")
         price_raw = await price_el.inner_text() if price_el else "0"
@@ -126,6 +137,10 @@ async def process_single_product_raw(item, target_region, target_airport, curren
             "이미지URL": img_url,
             "지정지역": target_region,
             "출발공항": target_airport,
+            # 💡 Batch API 연동을 위해 딕셔너리 내부 키값을 프롬프트 전송용 데이터와 일치시킴
+            "full_title": full_title,
+            "region": target_region,
+            "departure_airport": target_airport,
             "duration": duration,
             "description": product_desc,
             "hashtags": ", ".join(all_hashtags)
@@ -151,7 +166,6 @@ async def run_crawler():
     except Exception as auth_error:
         print(f"❌ 구글 API 인증 실패: {auth_error}"); return
 
-    # 하드코딩 완전 제거
     source_spreadsheet_id = os.environ.get("SOURCE_SPREADSHEET_ID")
     if not source_spreadsheet_id:
         print("❌ 에러: 환경 변수 'SOURCE_SPREADSHEET_ID'가 설정되어 있지 않습니다.")
@@ -170,7 +184,7 @@ async def run_crawler():
     target_tasks = []
     for row in data_rows:
         if len(row) >= 1:
-            url_clean = row[0].strip()  # 💡 방어 코드: 구글 시트 내 보이지 않는 공백 제거
+            url_clean = row[0].strip()  
             if url_clean.startswith("http"):
                 target_tasks.append({
                     "url": url_clean,
@@ -188,7 +202,6 @@ async def run_crawler():
             pid = str(r.get("ID", "")).strip()
             if pid:
                 t_opts = [str(r.get(f"네이버_상품명_{i}", "")).strip() for i in range(1, 6)]
-                # 💡 ID는 존재하지만 5개 컬럼의 텍스트 내용이 아예 없는 경우는 기수집 캐시에서 제외(새로 빌드 유도)
                 if not any(t_opts):
                     continue
                 existing_titles_dict[pid] = t_opts
@@ -196,7 +209,7 @@ async def run_crawler():
     except Exception:
         print("⚠️ 기존 github2 캐시가 없거나 비어있습니다. 전수 조사로 진행합니다.")
 
-    # 1단계: Playwright 고속 크롤링 (★ 버전1의 스마트 동적 브라우저 핸들링 완벽 이식)
+    # 1단계: Playwright 고속 크롤링
     raw_products = []
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
@@ -213,9 +226,9 @@ async def run_crawler():
             
             try:
                 print(f"🔄 {target_region} (출발: {target_airport}) 페이지 로딩 중...")
-                await page.goto(current_url, wait_until="domcontentloaded", timeout=30000)
+                # 💡 [안정성 보완] 비동기 데이터 렌더링 누락 방지를 위해 networkidle 대기로 고정
+                await page.goto(current_url, wait_until="networkidle", timeout=30000)
                 
-                # 💡 동적 데이터를 기다려주는 동기화 구문 (버전1 완벽 이식)
                 try:
                     await page.wait_for_selector(".option_wrap.result .count em", timeout=10000)
                 except Exception:
@@ -334,6 +347,8 @@ async def run_crawler():
                         llm_results[c_id] = validated_options
                     except Exception:
                         llm_results[c_id] = ["[Error]"] * 5
+                    if len(llm_results) % 10 == 0:
+                         await asyncio.sleep(0.1)
                 break
             elif status_check.status in ["failed", "cancelled", "expired"]:
                 print(f"❌ OpenAI Batch 작업 실패 혹은 취소됨: {status_check.status}")
@@ -371,6 +386,7 @@ async def run_crawler():
             "네이버_상품명_2": t_list[1],
             "네이버_상품명_3": t_list[2],
             "네이버_상품명_4": t_list[3],
+            "네이버_상품명_4": t_list[3],
             "네이버_상품명_5": t_list[4]
         })
 
@@ -385,7 +401,9 @@ async def run_crawler():
             doc = gc.open_by_key(target_spreadsheet_id)
             sheet = doc.worksheet("github2")
             sheet.clear()
-            sheet.update(values=[df.columns.values.tolist()] + df.values.tolist(), range_name='A1')
+            
+            # 💡 [문법 수정] 최신 gspread 스펙에 맞춰 매개변수 구조 전면 개편 적용
+            sheet.update('A1', [df.columns.values.tolist()] + df.values.tolist())
             print(f"✅ 구글 시트 github2 반영 완료 (30~45자 가이드 5옵션 버전)")
         except Exception as e:
             print(f"❌ 시트 반영 실패: {e}")
