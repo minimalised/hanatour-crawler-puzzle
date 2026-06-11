@@ -10,14 +10,9 @@ from google.oauth2.service_account import Credentials
 from playwright.async_api import async_playwright
 from openai import AsyncOpenAI
 
-# 1. OpenAI 비동기 클라이언트 초기화
 openai_client = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY", "YOUR_LOCAL_API_KEY"))
 
 async def generate_naver_titles_llm(data):
-    """
-    GPT-4o-mini를 활용하여 네이버 쇼핑 가이드에 맞춘 고정된 상품명 3개를 생성합니다.
-    """
-    # 💡 출발지 정보가 없을 때 임의의 접두어([기본출발] 등) 생성 행위를 완벽하게 차단합니다.
     if data['departure_airport'] != "없음":
         departure_context = f"- 지정 출발공항: {data['departure_airport']} (반드시 상품명 맨 앞에 '{data['departure_airport']}' 형식으로 고정 배치할 것)"
     else:
@@ -75,9 +70,6 @@ async def generate_naver_titles_llm(data):
 
 
 async def process_single_product(item, target_region, target_airport, current_url, existing_titles_dict, runtime_titles_dict):
-    """
-    개별 상품 정보를 추출하고 고유 ID 대조 및 실시간 런타임 캐싱 검증을 거쳐 최소한의 LLM 연산만 수행합니다.
-    """
     try:
         main_info = await item.query_selector(":scope > .inr.right")
         img_check = await item.query_selector(":scope > .inr.img")
@@ -85,41 +77,33 @@ async def process_single_product(item, target_region, target_airport, current_ur
         if not main_info or not img_check:
             return None
 
-        # 1. 원본 풀 타이틀 가져오기
         title_el = await main_info.query_selector(".item_title")
         full_title = (await title_el.inner_text()).strip() if title_el else "제목 없음"
 
-        # 2. 가격 먼저 추출 (ID 생성에 결합하기 위해 순서 조정)
         price_el = await main_info.query_selector(".price")
         price_raw = await price_el.inner_text() if price_el else "0"
         price = "".join(filter(str.isdigit, price_raw))
 
-        # 💡 [ID 고유화] 상품명 + 가격 조합으로 유일한 해시 ID를 생성하여 중복 타이틀의 무결성 확보
         unique_str = f"{full_title}_{price}"
         product_id = hashlib.md5(unique_str.encode()).hexdigest()[:8]
 
-        # 3. 타이틀 내부 해시태그 분리 (정제상품명 변수 제거)
         if "#" in full_title:
             parts = full_title.split("#")
             title_hashtags = sorted([p.strip() for p in parts[1:] if p.strip()])
         else:
             title_hashtags = []
 
-        # 4. 하단 UI 해시태그 그룹 추가 수집
         hash_span_els = await main_info.query_selector_all(".hash_group span")
         ui_hashtags = [(await h.inner_text()).replace("#", "").strip() for h in hash_span_els]
         all_hashtags = sorted(list(set(title_hashtags + ui_hashtags)))
 
-        # 5. 본문 요약 설명 추출
         desc_el = await main_info.query_selector(".item_text.stit")
         product_desc = (await desc_el.inner_text()).strip() if desc_el else ""
 
-        # 6. 정확한 여행 기간 추출
         duration_el = await main_info.query_selector("span.icn.cal")
         duration_text = (await duration_el.inner_text()).strip() if duration_el else ""
         duration = duration_text.replace("여행기간", "").strip()
 
-        # 7. 이미지 URL 추출 (bg_alpha 기지연 로딩 방어벽 완벽 적용)
         img_url = ""
         img_el = await img_check.query_selector("img")
         if img_el:
@@ -142,16 +126,12 @@ async def process_single_product(item, target_region, target_airport, current_ur
         if img_url and img_url.startswith("//"): 
             img_url = "https:" + img_url
 
-        # 💡 [비용 최적화 2중 가드레일 구조]
         if product_id in existing_titles_dict:
-            # 1계층: 구글 시트에 이미 등록된 완전 동일 상품(ID 기준)인 경우 기존 타이틀 그대로 재사용 (비용 0원)
             t1, t2, t3 = existing_titles_dict[product_id]
         elif full_title in runtime_titles_dict:
-            # 2계층: 시트에는 없지만 '이번 실행 회차' 내에서 이미 동일한 원본명을 처리한 대안 상품인 경우 결과 복사 (비용 0원 방어)
             t1, t2, t3 = runtime_titles_dict[full_title]
             print(f"♻️ [비용 절감] 동일 회차 내 원본 상품명 캐시 재사용: {full_title}")
         else:
-            # 3계층: 전수 검증을 통과한 순수 신규 상품일 때만 딱 1번 LLM 호출
             print(f"✨ [신규 상품 발견] LLM 타이틀 최초 생성: {full_title}")
             ai_input_data = {
                 "full_title": full_title,
@@ -162,7 +142,6 @@ async def process_single_product(item, target_region, target_airport, current_ur
                 "hashtags": ", ".join(all_hashtags)
             }
             t1, t2, t3 = await generate_naver_titles_llm(ai_input_data)
-            # 다른 동명이인 대안 상품들의 중복 호출을 막기 위해 런타임 캐시에 실시간 기록
             runtime_titles_dict[full_title] = (t1, t2, t3)
 
         return {
@@ -200,7 +179,6 @@ async def run_crawler():
         print(f"❌ 구글 API 인증 실패: {auth_error}")
         return
 
-    # ------------------ URL 및 메타데이터 로드부 ------------------
     print("🌐 스프레드시트에서 URL, 지역, 출발공항 리스트를 불러오는 중...")
     source_spreadsheet_id = "1mH51VHs4y0FgClkUBvZgw7oY3Yv7gQBA_a3um9uhX0I"
     try:
@@ -229,7 +207,6 @@ async def run_crawler():
         print(f"❌ URL 리스트를 가공하는 중 에러 발생: {e}")
         return
 
-    # 💡 [비용 최적화 준비] 첫 번째 타겟 구글 시트에서 기존에 수집했던 네이버 상품명 대조군 로드
     existing_titles_dict = {}
     try:
         print("📥 캐싱용 기존 시트 데이터 파싱 중...")
@@ -247,10 +224,8 @@ async def run_crawler():
     except Exception as cache_error:
         print(f"⚠️ 기존 시트 로드 실패(첫 실행이거나 시트가 비었음). 전수 LLM 생성 모드로 진행합니다. 원인: {cache_error}")
 
-    # 💡 [실시간 캐시 선언] 이번 회차 루프 내에서 중복되는 대안 상품들의 LLM 정제 명칭을 임시 기억하는소
     runtime_titles_dict = {}
 
-    # ------------------ 크롤링 및 LLM 변환 실행부 ------------------
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         context = await browser.new_context(
@@ -325,36 +300,32 @@ async def run_crawler():
                 print(f"❌ {current_url} 접속 에러: {e}")
                 continue
 
-        # ------------------ 구글 시트 적재부 ------------------
         if all_products:
             print("\n🚀 결과 스프레드시트 업데이트 시작...")
-            target_spreadsheet_ids = [
-                "1mH51VHs4y0FgClkUBvZgw7oY3Yv7gQBA_a3um9uhX0I",
-                "1JgWk9PYT6LG_1GnPdpVY0mZavcHXDWRSrzdE0lVmjj4",
-                "1Hoq0N88mestsHXbIOjwue3OctXf7dvKkx99eieYFhAY",
-                "1BK4xUHQFrLjLTn6vE0jSuwqMvSU7ZMKIV-nPvmySPx8"
-            ]
+            
+            target_spreadsheet_id = os.environ.get("TARGET_SPREADSHEET_ID")
             worksheet_name = "github"
 
-            try:
-                df = pd.DataFrame(all_products)
-                # 💡 컬럼 순서에서 '정제상품명'을 완전히 제거했습니다.
-                column_order = ["ID", "원본상품명", "가격", "URL", "이미지URL", "지정지역", "출발공항", "네이버_상품명_1", "네이버_상품명_2", "네이버_상품명_3"]
-                df = df[column_order]
-                data_to_upload = [df.columns.values.tolist()] + df.values.tolist()
+            if not target_spreadsheet_id:
+                print("❌ 에러: 환경 변수 'TARGET_SPREADSHEET_ID'가 설정되어 있지 않습니다.")
+            else:
+                try:
+                    df = pd.DataFrame(all_products)
+                    column_order = ["ID", "원본상품명", "가격", "URL", "이미지URL", "지정지역", "출발공항", "네이버_상품명_1", "네이버_상품명_2", "네이버_상품명_3"]
+                    df = df[column_order]
+                    data_to_upload = [df.columns.values.tolist()] + df.values.tolist()
 
-                for spreadsheet_id in target_spreadsheet_ids:
                     try:
-                        doc = gc.open_by_key(spreadsheet_id)
+                        doc = gc.open_by_key(target_spreadsheet_id)
                         sheet = doc.worksheet(worksheet_name)
                         sheet.clear()  
                         sheet.update(values=data_to_upload, range_name='A1')
-                        print(f"✅ 성공: [{doc.title}] 업데이트 완료")
+                        print(f"✅ 성공: Secret 시트 [{doc.title}] ({target_spreadsheet_id}) 업데이트 완료")
                     except Exception as sheet_error:
-                        print(f"⚠️ {spreadsheet_id} 업데이트 실패: {sheet_error}")
+                        print(f"⚠️ 시트({target_spreadsheet_id}) 업데이트 실패: {sheet_error}")
 
-            except Exception as e:
-                print(f"❌ 구글 시트 결과 적재 에러: {e}")
+                except Exception as e:
+                    print(f"❌ 구글 시트 결과 가공 중 에러: {e}")
         
         await browser.close()
 
