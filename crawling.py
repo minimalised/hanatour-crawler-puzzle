@@ -180,8 +180,11 @@ async def run_crawler():
         return
 
     print("🌐 스프레드시트에서 URL, 지역, 출발공항 리스트를 불러오는 중...")
-    # 💡 하드코딩 제거: 환경 변수 SOURCE_SPREADSHEET_ID 로드 (없을 경우 기존 ID를 백업으로 사용)
-    source_spreadsheet_id = os.environ.get("SOURCE_SPREADSHEET_ID", "1mH51VHs4y0FgClkUBvZgw7oY3Yv7gQBA_a3um9uhX0I")
+    # 💡 하드코딩 흔적 완전 제거: 오직 GitHub Secrets의 환경변수에서만 식별 ID를 가져옵니다.
+    source_spreadsheet_id = os.environ.get("SOURCE_SPREADSHEET_ID")
+    if not source_spreadsheet_id:
+        print("❌ 에러: 환경 변수 'SOURCE_SPREADSHEET_ID'가 설정되어 있지 않습니다.")
+        return
     
     try:
         source_doc = gc.open_by_key(source_spreadsheet_id)
@@ -305,7 +308,7 @@ async def run_crawler():
         if all_products:
             print("\n🚀 결과 스프레드시트 업데이트 시작...")
             
-            # 💡 TARGET_SPREADSHEET_ID가 설정되어 있지 않으면 SOURCE_SPREADSHEET_ID를 기본값으로 활용
+            # 💡 TARGET_SPREADSHEET_ID가 설정되어 있지 않으면 source_spreadsheet_id를 백업 타겟으로 자동 활용
             target_spreadsheet_id = os.environ.get("TARGET_SPREADSHEET_ID", source_spreadsheet_id)
             worksheet_name = "github"
 
