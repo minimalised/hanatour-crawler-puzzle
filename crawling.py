@@ -180,7 +180,9 @@ async def run_crawler():
         return
 
     print("🌐 스프레드시트에서 URL, 지역, 출발공항 리스트를 불러오는 중...")
-    source_spreadsheet_id = "1mH51VHs4y0FgClkUBvZgw7oY3Yv7gQBA_a3um9uhX0I"
+    # 💡 하드코딩 제거: 환경 변수 SOURCE_SPREADSHEET_ID 로드 (없을 경우 기존 ID를 백업으로 사용)
+    source_spreadsheet_id = os.environ.get("SOURCE_SPREADSHEET_ID", "1mH51VHs4y0FgClkUBvZgw7oY3Yv7gQBA_a3um9uhX0I")
+    
     try:
         source_doc = gc.open_by_key(source_spreadsheet_id)
         source_sheet = source_doc.worksheet("상품리스트")
@@ -303,29 +305,27 @@ async def run_crawler():
         if all_products:
             print("\n🚀 결과 스프레드시트 업데이트 시작...")
             
-            target_spreadsheet_id = os.environ.get("TARGET_SPREADSHEET_ID")
+            # 💡 TARGET_SPREADSHEET_ID가 설정되어 있지 않으면 SOURCE_SPREADSHEET_ID를 기본값으로 활용
+            target_spreadsheet_id = os.environ.get("TARGET_SPREADSHEET_ID", source_spreadsheet_id)
             worksheet_name = "github"
 
-            if not target_spreadsheet_id:
-                print("❌ 에러: 환경 변수 'TARGET_SPREADSHEET_ID'가 설정되어 있지 않습니다.")
-            else:
+            try:
+                df = pd.DataFrame(all_products)
+                column_order = ["ID", "원본상품명", "가격", "URL", "이미지URL", "지정지역", "출발공항", "네이버_상품명_1", "네이버_상품명_2", "네이버_상품명_3"]
+                df = df[column_order]
+                data_to_upload = [df.columns.values.tolist()] + df.values.tolist()
+
                 try:
-                    df = pd.DataFrame(all_products)
-                    column_order = ["ID", "원본상품명", "가격", "URL", "이미지URL", "지정지역", "출발공항", "네이버_상품명_1", "네이버_상품명_2", "네이버_상품명_3"]
-                    df = df[column_order]
-                    data_to_upload = [df.columns.values.tolist()] + df.values.tolist()
+                    doc = gc.open_by_key(target_spreadsheet_id)
+                    sheet = doc.worksheet(worksheet_name)
+                    sheet.clear()  
+                    sheet.update(values=data_to_upload, range_name='A1')
+                    print(f"✅ 성공: Secret 시트 [{doc.title}] ({target_spreadsheet_id}) 업데이트 완료")
+                except Exception as sheet_error:
+                    print(f"⚠️ 시트({target_spreadsheet_id}) 업데이트 실패: {sheet_error}")
 
-                    try:
-                        doc = gc.open_by_key(target_spreadsheet_id)
-                        sheet = doc.worksheet(worksheet_name)
-                        sheet.clear()  
-                        sheet.update(values=data_to_upload, range_name='A1')
-                        print(f"✅ 성공: Secret 시트 [{doc.title}] ({target_spreadsheet_id}) 업데이트 완료")
-                    except Exception as sheet_error:
-                        print(f"⚠️ 시트({target_spreadsheet_id}) 업데이트 실패: {sheet_error}")
-
-                except Exception as e:
-                    print(f"❌ 구글 시트 결과 가공 중 에러: {e}")
+            except Exception as e:
+                print(f"❌ 구글 시트 결과 가공 중 에러: {e}")
         
         await browser.close()
 
