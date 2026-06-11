@@ -39,7 +39,7 @@ def make_batch_prompt(data):
     if data['departure_airport'] != "없음":
         departure_context = f"- 지정 출발공항: {data['departure_airport']} (반드시 상품명 맨 앞에 '{data['departure_airport']}' 형식으로 고정 배치할 것)"
     else:
-        departure_context = "- 지정 출발공항: 없음 (★주의: 상품명 맨 앞에 '[기본출발]', '[전국출발]' 등 어떠한 출발 관련 문구도 절대 넣지 말고, 곧바로 '지역명'부터 시작할 것)"
+        departure_context = "- 지정 출발공항: 없음 (★주의: 상품명 맨 앞에 '[기본출발]', '[전국출발]' 등 어써한 출발 관련 문구도 절대 넣지 말고, 곧바로 '지역명'부터 시작할 것)"
 
     return f"""당신은 네이버 쇼핑 검색 최적화(SEO) 기준에 맞춰 여행 상품명을 정제하고 재창조하는 마케팅 자동화 전문가입니다.
 제공된 정형 데이터를 바탕으로 가이드라인을 완벽히 준수하는 서로 다른 스타일의 새로운 상품명 5개를 생성하세요.
@@ -324,6 +324,8 @@ async def run_crawler():
         except Exception as e:
             print(f"❌ 시트 반영 실패: {e}")
 
+# -------------------------------------------------------------
+# [수정] 표준 비동기 루프 호출 구조로 문법 오류 근본적 해결
+# -------------------------------------------------------------
 if __name__ == "__main__":
-    async with asyncio.Runner() as runner:
-        runner.run(run_crawler())
+    asyncio.run(run_crawler())
