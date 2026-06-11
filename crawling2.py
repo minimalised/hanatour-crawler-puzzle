@@ -151,9 +151,19 @@ async def run_crawler():
     except Exception as auth_error:
         print(f"❌ 구글 API 인증 실패: {auth_error}"); return
 
-    source_spreadsheet_id = "1mH51VHs4y0FgClkUBvZgw7oY3Yv7gQBA_a3um9uhX0I"
-    source_doc = gc.open_by_key(source_spreadsheet_id)
-    source_sheet = source_doc.worksheet("상품리스트")
+    # 💡 하드코딩 완전 제거: 오직 환경 변수로만 작동하며, 없을 경우 에러 메시지와 함께 종료됩니다.
+    source_spreadsheet_id = os.environ.get("SOURCE_SPREADSHEET_ID")
+    if not source_spreadsheet_id:
+        print("❌ 에러: 환경 변수 'SOURCE_SPREADSHEET_ID'가 설정되어 있지 않습니다.")
+        return
+    
+    try:
+        source_doc = gc.open_by_key(source_spreadsheet_id)
+        source_sheet = source_doc.worksheet("상품리스트")
+    except Exception as e:
+        print(f"❌ 소스 스프레드시트 로드 실패: {e}")
+        return
+
     data_rows = source_sheet.get_all_values()[1:]
     
     target_tasks = []
@@ -314,6 +324,7 @@ async def run_crawler():
                         "네이버_상품명_1", "네이버_상품명_2", "네이버_상품명_3", "네이버_상품명_4", "네이버_상품명_5"]
         df = df[column_order]
         
+        # 💡 TARGET_SPREADSHEET_ID가 지정되지 않았을 경우 source_spreadsheet_id를 활용합니다.
         target_spreadsheet_id = os.environ.get("TARGET_SPREADSHEET_ID", source_spreadsheet_id)
         try:
             doc = gc.open_by_key(target_spreadsheet_id)
@@ -325,7 +336,7 @@ async def run_crawler():
             print(f"❌ 시트 반영 실패: {e}")
 
 # -------------------------------------------------------------
-# [수정] 표준 비동기 루프 호출 구조로 문법 오류 근본적 해결
+# 표준 비동기 루프 호출 구조
 # -------------------------------------------------------------
 if __name__ == "__main__":
     asyncio.run(run_crawler())
