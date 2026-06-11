@@ -1,13 +1,14 @@
 name: Daily Hanatour Crawling (Batch v2)
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:      # 수동 실행 버튼 활성화
 
 jobs:
   build:
     runs-on: ubuntu-latest
     container:
-      image: mcr.microsoft.com/playwright:v1.60.0-jammy
+      # 💡 기존 -jammy에서 GLIBC 2.38 이상을 기본 지원하는 최신 -noble(Ubuntu 24.04) 이미지로 전격 변경
+      image: mcr.microsoft.com/playwright:v1.60.0-noble
 
     steps:
       - name: Checkout code
