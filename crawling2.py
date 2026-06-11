@@ -74,7 +74,7 @@ def make_batch_prompt(data):
 }}"""
 
 # -------------------------------------------------------------
-# [초고속 핸들러] 실시간 비동기 병렬 호출 제어 엔진
+# [초고속 핸들러] 실시간 비동기 병렬 호출 제어 엔진 (하드 가드 포함)
 # -------------------------------------------------------------
 async def fetch_live_llm_title(p, semaphore, runtime_cache_check, llm_results):
     p_id = p["ID"]
@@ -98,7 +98,21 @@ async def fetch_live_llm_title(p, semaphore, runtime_cache_check, llm_results):
             res_json = json.loads(response.choices[0].message.content)
             options = [res_json.get(f"option_{i}", "").strip() for i in range(1, 6)]
             
-            # 새롭게 정의된 관대한 필터로 검증 진행
+            # 💡 [★ 하드웨어 스크립트 가드 추가] 출발공항 누락 대비 무조건 보정 엔진
+            airport = p.get('departure_airport', "없음")
+            if airport != "없음" and airport:
+                fixed_options = []
+                for opt in options:
+                    if not opt.startswith(airport):
+                        # 대괄호를 뺀 텍스트 매칭 및 트레일링 공백 등 예외 정제
+                        clean_airport = airport.replace("[", "").replace("]", "").strip()
+                        clean_opt = opt.replace(airport, "").replace(clean_airport, "").strip()
+                        fixed_options.append(f"{airport} {clean_opt}")
+                    else:
+                        fixed_options.append(opt)
+                options = fixed_options
+            
+            # 새롭게 정의된 완화 필터로 사후 검증 진행
             llm_results[p_id] = [opt if validate_naver_title(opt) else f"[⚠️가이드미달] {opt}" for opt in options]
         except Exception as e:
             print(f"❌ 단일 상품 LLM 생성 오류 패스 ({orig_title}): {e}")
@@ -211,7 +225,6 @@ async def run_crawler():
             pid = str(r.get("ID", "")).strip()
             if pid:
                 t_opts = [str(r.get(f"네이버_상품명_{i}", "")).strip() for i in range(1, 6)]
-                # 기존 시트에 [⚠️가이드미달] 문구가 포함되어 있다면 캐시에서 제외하고 새로 생성하도록 유도합니다.
                 if not any(t_opts) or any("[⚠️가이드미달]" in opt for opt in t_opts): continue
                 existing_titles_dict[pid] = t_opts
         print(f"✅ 정상 수집된 기존 상품 {len(existing_titles_dict)}개를 캐싱했습니다. (미달 본은 자동 리셋 대상)")
