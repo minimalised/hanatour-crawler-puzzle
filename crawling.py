@@ -80,7 +80,7 @@ async def process_single_product(item, target_region, target_airport, current_ur
         title_el = await main_info.query_selector(".item_title")
         full_title = (await title_el.inner_text()).strip() if title_el else "제목 없음"
 
-        # 💡 [보완] 시트상 출발공항이 '없음'이거나 부실하게 들어와도, URL이나 타이틀에서 매칭하여 보정합니다.
+        # 💡 시트상 출발공항이 '없음'이거나 부실하게 들어와도, URL이나 타이틀에서 매칭하여 보정합니다.
         if target_airport == "없음" or not target_airport:
             if "[청주출발]" in full_title or "depCityCd=CJJ" in current_url:
                 target_airport = "[청주출발]"
@@ -198,6 +198,7 @@ async def run_crawler():
     
     try:
         source_doc = gc.open_by_key(source_spreadsheet_id)
+        source_doc = gc.open_by_key(source_spreadsheet_id)
         source_sheet = source_doc.worksheet("상품리스트")
         
         all_rows = source_sheet.get_all_values()
@@ -206,7 +207,7 @@ async def run_crawler():
         
         target_tasks = []
         for row in data_rows:
-            if len(row) >= 1 and row[0].startswith("http"):
+            if len(row) >= 1 and row[0].strip().startswith("http"):
                 url = row[0].strip()
                 region = row[1].strip() if len(row) > 1 and row[1].strip() else "지역명 미상"
                 airport = row[2].strip() if len(row) > 2 and row[2].strip() else "없음"
@@ -263,10 +264,11 @@ async def run_crawler():
             
             try:
                 print(f"🔄 {target_region} (출발: {target_airport}) 페이지 로딩 중...")
-                # 💡 [안정성 강화] Ajax 호출 완료 시점 동기화를 위해 networkidle 옵션을 사용합니다.
-                await page.goto(current_url, wait_until="networkidle", timeout=30000)
+                # 💡 [핵심 수정] networkidle 대신 구조가 파싱되면 즉시 통과하는 domcontentloaded로 타임아웃 방지
+                await page.goto(current_url, wait_until="domcontentloaded", timeout=30000)
                 
                 try:
+                    # 🎯 대신 뒤에서 비동기로 수집되는 상품 총 개수 태그가 나타날 때까지만 부분 대기합니다.
                     await page.wait_for_selector(".option_wrap.result .count em", timeout=10000)
                 except Exception:
                     pass
