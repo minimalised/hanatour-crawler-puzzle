@@ -13,7 +13,7 @@ from openai import AsyncOpenAI
 openai_client = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY", "YOUR_LOCAL_API_KEY"))
 
 # -------------------------------------------------------------
-# [변경] 네이버 SEO 사후 검증 함수 (글자 수 기준: 30자 ~ 45자)
+# [사후 검증] 네이버 SEO 사후 검증 함수 (글자 수 기준: 30자 ~ 45자)
 # -------------------------------------------------------------
 def validate_naver_title(title):
     """네이버 쇼핑 상품명 가이드라인 만족 여부 검증"""
@@ -33,11 +33,13 @@ def validate_naver_title(title):
     return True
 
 # -------------------------------------------------------------
-# [변경] 프롬프트 생성 함수 (글자 수 가이드라인 30자 ~ 45자로 변경)
+# [프롬프트] 2번 버전용 배치 프롬프트 생성기 (KeyError 완전 방어)
 # -------------------------------------------------------------
 def make_batch_prompt(data):
-    if data.get('departure_airport', "없음") != "없음":
-        departure_context = f"- 지정 출발공항: {data['departure_airport']} (반드시 상품명 맨 앞에 '{data['departure_airport']}' 형식으로 고정 배치할 것)"
+    # dict.get()을 사용하여 key가 없을 때의 크래시를 원천 차단합니다.
+    airport = data.get('departure_airport', "없음")
+    if airport != "없음":
+        departure_context = f"- 지정 출발공항: {airport} (반드시 상품명 맨 앞에 '{airport}' 형식으로 고정 배치할 것)"
     else:
         departure_context = "- 지정 출발공항: 없음 (★주의: 상품명 맨 앞에 '[기본출발]', '[전국출발]' 등 어떠한 출발 관련 문구도 절대 넣지 말고, 곧바로 '지역명'부터 시작할 것)"
 
@@ -45,12 +47,12 @@ def make_batch_prompt(data):
 제공된 정형 데이터를 바탕으로 가이드라인을 완벽히 준수하는 서로 다른 스타일의 새로운 상품명 5개를 생성하세요.
 
 [입력 데이터]
-- 기준 상품명: {data['full_title']}
-- 여행 지역: {data['region']}
-- 기간: {data['duration']}
+- 기준 상품명: {data.get('full_title', '제목없음')}
+- 여행 지역: {data.get('region', '지역명 미상')}
+- 기간: {data.get('duration', '기간 미상')}
 {departure_context}
-- 핵심 설명: {data['description']}
-- 추출 키워드: {data['hashtags']}
+- 핵심 설명: {data.get('description', '')}
+- 추출 키워드: {data.get('hashtags', '')}
 
 [네이버 쇼핑 상품명 가이드라인]
 1. 글자 수: 공백 포함 최소 30자 ~ 최대 45자 사이로 풍성하고 유연하게 구성한다. (30자 미만, 45자 초과 절대 금지)
@@ -71,7 +73,7 @@ def make_batch_prompt(data):
 }}"""
 
 # -------------------------------------------------------------
-# 기존 개별 수집 로직 (출발공항 자동 매칭 및 방어 로직 이식)
+# [1단계 데이터 수집] 1번 버전의 안정적인 추출 방식을 그대로 유지
 # -------------------------------------------------------------
 async def process_single_product_raw(item, target_region, target_airport, current_url):
     try:
@@ -82,7 +84,7 @@ async def process_single_product_raw(item, target_region, target_airport, curren
         title_el = await main_info.query_selector(".item_title")
         full_title = (await title_el.inner_text()).strip() if title_el else "제목 없음"
 
-        # 💡 [방어 코드 이식] 시트상 출발공항이 '없음'이거나 유실되어도 URL 및 타이틀에서 자동 매칭 및 보정
+        # 💡 [출발지 자동 보정] 하나투어의 URL과 원본 제목을 분석해 출발 공항을 강제로 맵핑합니다.
         if target_airport == "없음" or not target_airport:
             if "[청주출발]" in full_title or "depCityCd=CJJ" in current_url:
                 target_airport = "[청주출발]"
@@ -129,6 +131,7 @@ async def process_single_product_raw(item, target_region, target_airport, curren
         if img_url and img_url.startswith("//"): 
             img_url = "https:" + img_url
 
+        # 💡 수집된 원본 데이터에 배치용 Key 이름을 완벽하게 매칭시켜 반환합니다.
         return {
             "ID": product_id,
             "원본상품명": full_title,
@@ -137,7 +140,8 @@ async def process_single_product_raw(item, target_region, target_airport, curren
             "이미지URL": img_url,
             "지정지역": target_region,
             "출발공항": target_airport,
-            # 💡 Batch API 연동을 위해 딕셔너리 내부 키값을 프롬프트 전송용 데이터와 일치시킴
+            
+            # 아래 Key들이 make_batch_prompt로 그대로 유입되므로 이름을 철저하게 맞춰줍니다.
             "full_title": full_title,
             "region": target_region,
             "departure_airport": target_airport,
@@ -150,7 +154,7 @@ async def process_single_product_raw(item, target_region, target_airport, curren
         return None
 
 # -------------------------------------------------------------
-# 메인 실행 함수 (Batch API 아키텍처 적용)
+# 메인 실행 함수 (Batch API 아키텍처 안정화 버전)
 # -------------------------------------------------------------
 async def run_crawler():
     print("🌐 구글 API 인증 및 스프레드시트 연결 중...")
@@ -194,7 +198,7 @@ async def run_crawler():
                 
     print(f"✅ 총 {len(target_tasks)}개의 유효 타겟 상품 라인을 확보했습니다.")
 
-    # 캐싱 데이터 로드 (github2에서 로드 및 공란 예외 필터 처리)
+    # 캐싱 데이터 로드
     existing_titles_dict = {}
     try:
         github_sheet = source_doc.worksheet("github2")
@@ -209,7 +213,7 @@ async def run_crawler():
     except Exception:
         print("⚠️ 기존 github2 캐시가 없거나 비어있습니다. 전수 조사로 진행합니다.")
 
-    # 1단계: Playwright 고속 크롤링
+    # 1단계: Playwright 크롤링 시작
     raw_products = []
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
@@ -226,11 +230,11 @@ async def run_crawler():
             
             try:
                 print(f"🔄 {target_region} (출발: {target_airport}) 페이지 로딩 중...")
-                # 💡 [안정성 보완] 비동기 데이터 렌더링 누락 방지를 위해 networkidle 대기로 고정
-                await page.goto(current_url, wait_until="networkidle", timeout=30000)
+                # 💡 [타임아웃 원인 해결] 하나투어의 무한 백그라운드 요청을 무시하기 위해 무조건 domcontentloaded로 진입합니다.
+                await page.goto(current_url, wait_until="domcontentloaded", timeout=40000)
                 
                 try:
-                    await page.wait_for_selector(".option_wrap.result .count em", timeout=10000)
+                    await page.wait_for_selector(".option_wrap.result .count em", timeout=12000)
                 except Exception:
                     pass
 
@@ -303,7 +307,7 @@ async def run_crawler():
                     "model": "gpt-4o-mini",
                     "messages": [
                         {"role": "system", "content": "You are a helpful assistant that outputs JSON."},
-                        {"role": "user", "content": make_batch_prompt(p)}
+                        {"role": "user", "content": make_batch_prompt(p)} # p 내부에 매칭 완료!
                     ],
                     "response_format": {"type": "json_object"},
                     "temperature": 0.2
@@ -311,7 +315,7 @@ async def run_crawler():
             }
             f.write(json.dumps(task_json, ensure_ascii=False) + "\n")
 
-    # 3단계: OpenAI Batch 전송 및 대기
+    # 3단계: OpenAI Batch 전송 및 완료 대기
     llm_results = {}
     if has_new_request:
         print("🚀 OpenAI Batch 서버로 일괄 요청 업로드 중 (비용 50% 할인 모드)...")
@@ -354,11 +358,12 @@ async def run_crawler():
                 print(f"❌ OpenAI Batch 작업 실패 혹은 취소됨: {status_check.status}")
                 break
             else:
+                # 대량 처리 모니터링 대기 주기 (15초)
                 await asyncio.sleep(15)
     else:
         print("♻️ 모든 상품이 이미 기수집되어 캐시를 사용합니다. LLM을 호출하지 않습니다.")
 
-    # 4단계: 최종 데이터 결합 및 구글 시트 업데이트
+    # 4단계: 최종 데이터 조립 및 구글 시트 반영
     final_table = []
     for p in raw_products:
         p_id = p["ID"]
@@ -386,7 +391,6 @@ async def run_crawler():
             "네이버_상품명_2": t_list[1],
             "네이버_상품명_3": t_list[2],
             "네이버_상품명_4": t_list[3],
-            "네이버_상품명_4": t_list[3],
             "네이버_상품명_5": t_list[4]
         })
 
@@ -402,7 +406,7 @@ async def run_crawler():
             sheet = doc.worksheet("github2")
             sheet.clear()
             
-            # 💡 [문법 수정] 최신 gspread 스펙에 맞춰 매개변수 구조 전면 개편 적용
+            # 💡 [gspread 최신스펙] 에러가 유발되던 이전 문법을 최신 표준인 인자 2개 구조로 완벽히 리팩토링했습니다.
             sheet.update('A1', [df.columns.values.tolist()] + df.values.tolist())
             print(f"✅ 구글 시트 github2 반영 완료 (30~45자 가이드 5옵션 버전)")
         except Exception as e:
