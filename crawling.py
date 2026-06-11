@@ -180,7 +180,6 @@ async def run_crawler():
         return
 
     print("🌐 스프레드시트에서 URL, 지역, 출발공항 리스트를 불러오는 중...")
-    # 💡 하드코딩 흔적 완전 제거: 오직 GitHub Secrets의 환경변수에서만 식별 ID를 가져옵니다.
     source_spreadsheet_id = os.environ.get("SOURCE_SPREADSHEET_ID")
     if not source_spreadsheet_id:
         print("❌ 에러: 환경 변수 'SOURCE_SPREADSHEET_ID'가 설정되어 있지 않습니다.")
@@ -219,13 +218,19 @@ async def run_crawler():
         existing_data = github_sheet.get_all_records()
         
         for r in existing_data:
-            if r.get("ID"):
-                existing_titles_dict[str(r["ID"])] = (
-                    r.get("네이버_상품명_1", ""),
-                    r.get("네이버_상품명_2", ""),
-                    r.get("네이버_상품명_3", "")
-                )
-        print(f"✅ 기수집된 기존 상품 {len(existing_titles_dict)}개를 메모리에 캐싱했습니다. (중복 호출 방지 활성화)")
+            pid = str(r.get("ID", "")).strip()
+            if pid:
+                t1 = str(r.get("네이버_상품명_1", "")).strip()
+                t2 = str(r.get("네이버_상품명_2", "")).strip()
+                t3 = str(r.get("네이버_상품명_3", "")).strip()
+                
+                # 💡 보완: ID는 시트에 기재되어 있으나 생성 상품명 3개가 전부 비어있다면 캐시 저장을 패스합니다.
+                if not t1 and not t2 and not t3:
+                    continue
+                    
+                existing_titles_dict[pid] = (t1, t2, t3)
+                
+        print(f"✅ 기수집된 기존 상품 {len(existing_titles_dict)}개를 메모리에 캐싱했습니다. (공란 제외 완료)")
     except Exception as cache_error:
         print(f"⚠️ 기존 시트 로드 실패(첫 실행이거나 시트가 비었음). 전수 LLM 생성 모드로 진행합니다. 원인: {cache_error}")
 
@@ -308,7 +313,6 @@ async def run_crawler():
         if all_products:
             print("\n🚀 결과 스프레드시트 업데이트 시작...")
             
-            # 💡 TARGET_SPREADSHEET_ID가 설정되어 있지 않으면 source_spreadsheet_id를 백업 타겟으로 자동 활용
             target_spreadsheet_id = os.environ.get("TARGET_SPREADSHEET_ID", source_spreadsheet_id)
             worksheet_name = "github"
 
