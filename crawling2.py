@@ -13,24 +13,29 @@ from openai import AsyncOpenAI
 openai_client = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY", "YOUR_LOCAL_API_KEY"))
 
 # -------------------------------------------------------------
-# [사후 검증] 네이버 SEO 사후 검증 함수 (글자 수 기준: 30자 ~ 45자)
+# [사후 검증] 네이버 SEO 사후 검증 함수 (20자 ~ 45자 확장 버전)
 # -------------------------------------------------------------
 def validate_naver_title(title):
     """네이버 쇼핑 상품명 가이드라인 만족 여부 검증"""
     if not title:
         return False
-    if not (30 <= len(title) <= 45):
+    
+    # 💡 [글자 수 가이드 완화 패치] 최소 20자에서 최대 45자까지 넓게 인정
+    if not (20 <= len(title) <= 45):
         return False
+        
     words = title.split()
     if len(words) != len(set(words)):
         return False
-    forbidden = ["특가", "대박", "신상품", "세이브", "★", "▼", "▲", "◆"]
+        
+    # 💡 원본 데이터의 특성을 고려하여 '세이브'를 금지어 필터에서 완전히 제외합니다.
+    forbidden = ["특가", "대박", "신상품", "★", "▼", "▲", "◆"]
     if any(f_word in title for f_word in forbidden):
         return False
     return True
 
 # -------------------------------------------------------------
-# [프롬프트] 5옵션 생성 프롬프트기 (KeyError 완전 방어)
+# [프롬프트] 5옵션 생성 프롬프트기 (글자 수 기준 최적화)
 # -------------------------------------------------------------
 def make_batch_prompt(data):
     airport = data.get('departure_airport', "없음")
@@ -51,9 +56,9 @@ def make_batch_prompt(data):
 - 추출 키워드: {data.get('hashtags', '')}
 
 [네이버 쇼핑 상품명 가이드라인]
-1. 글자 수: 공백 포함 최소 30자 ~ 최대 45자 사이로 풍성하고 유연하게 구성한다. (30자 미만, 45자 초과 절대 금지)
+1. 글자 수: 공백 포함 최소 25자 ~ 최대 40자 사이로 유연하고 풍성하게 구성하세요. (명사 키워드를 알차게 조합하되 너무 짧게 끝나지 않도록 조절합니다.)
 2. 중복 제거: 상품명 내부에서 동일한 단어(ex: 방콕, 여행, 패키지 등)가 2회 이상 중복 나열되는 것을 절대 금지한다.
-3. 정제성: '신상품', '세이브', '특가', '대박', '★' 같은 홍보성 문구나 특수문자는 절대 포함하지 않는다.
+3. 정제성: 원본명에 있는 '신상품', '세이브', '특가' 같은 홍보성/등급성 문구나 특수문자는 절대 새로 만드는 상품명에 포함하지 마십시오.
 4. 출발지 조건 규칙: 
    - [지정 출발공항]이 존재할 경우: 반드시 상품명 맨 앞에 대괄호 형태로 배치한다. (예: [대구출발], [부산출발])
    - [지정 출발공항]이 '없음'일 경우: '기본출발', '전국출발' 같은 문구를 임의로 조작해서 넣지 말고 무조건 곧바로 지역명/브랜드명으로 상품명을 시작한다.
@@ -78,7 +83,6 @@ async def fetch_live_llm_title(p, semaphore, runtime_cache_check, llm_results):
     if orig_title in runtime_cache_check:
         return
 
-    # 💡 Semaphore를 통해 초당 API 동시 인입 제한을 걸어 Rate Limit을 완벽히 방어합니다.
     async with semaphore:
         try:
             runtime_cache_check[orig_title] = p_id
@@ -94,7 +98,6 @@ async def fetch_live_llm_title(p, semaphore, runtime_cache_check, llm_results):
             res_json = json.loads(response.choices[0].message.content)
             options = [res_json.get(f"option_{i}", "").strip() for i in range(1, 6)]
             
-            # 실시간 생성본도 30~45자 사후 검증 필터를 적용합니다.
             llm_results[p_id] = [opt if validate_naver_title(opt) else f"[⚠️가이드미달] {opt}" for opt in options]
         except Exception as e:
             print(f"❌ 단일 상품 LLM 생성 오류 패스 ({orig_title}): {e}")
@@ -267,12 +270,10 @@ async def run_crawler():
     if not raw_products:
         print("ℹ️ 수집된 상품이 없습니다."); return
 
-    # 💡 [핵심 패치] 실시간 동시 제어 비동기 병렬 구조 체인지 (Batch 완전 제거)
     print(f"📦 총 {len(raw_products)}개 상품 중 신규 및 공란 대상 초고속 실시간 생성 돌입...")
     runtime_cache_check = {}
     llm_results = {}
     
-    # 동시 실행 최대 바운더리 제한 (Rate Limit 방어용 컨커런시 세팅)
     semaphore = asyncio.Semaphore(15) 
     
     live_tasks = []
