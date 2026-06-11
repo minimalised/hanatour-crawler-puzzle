@@ -36,14 +36,18 @@ def validate_naver_title(title):
     return True
 
 # -------------------------------------------------------------
-# [프롬프트] 5옵션 생성 프롬프트기 (안정적 명사 조합 유도)
+# [프롬프트] 5옵션 생성 프롬프트기 (대괄호 쪼개짐 버그 방어 버전)
 # -------------------------------------------------------------
 def make_batch_prompt(data):
     airport = data.get('departure_airport', "없음")
-    if airport != "없음":
-        departure_context = f"- 지정 출발공항: {airport} (반드시 상품명 맨 앞에 '{airport}' 형식으로 고정 배치할 것)"
+    
+    # 지시문 내 대괄호([]) 기호 오염을 막기 위해 순수 텍스트(ex: 대구출발)로 정제 후 문장 가이드를 줍니다.
+    if airport != "없음" and airport:
+        clean_airport = airport.replace("[", "").replace("]", "").strip()
+        departure_context = f"""- 지정 출발지: {clean_airport}
+(★필수 규칙: 생성하는 5개 상품명은 반드시 문장 맨 앞에 대괄호를 붙인 '[{clean_airport}]' 문구로 시작해야 합니다. 예를 들어 '[{clean_airport}] 방콕 패키지...' 형태로 완벽하게 결합하여 출력하되, 절대로 '{clean_airport} [출발]'과 같이 대괄호 위치를 쪼개거나 분리하여 띄어 쓰지 마십시오.)"""
     else:
-        departure_context = "- 지정 출발공항: 없음 (★주의: 상품명 맨 앞에 '[기본출발]', '[전국출발]' 등 어떠한 출발 관련 문구도 절대 넣지 말고, 곧바로 '지역명'부터 시작할 것)"
+        departure_context = "- 지정 출발지: 없음\n(★주의: 상품명 맨 앞에 '기본출발', '전국출발' 같은 어떠한 출발 관련 문구도 절대 넣지 말고, 곧바로 '지역명'부터 시작할 것)"
 
     return f"""당신은 네이버 쇼핑 검색 최적화(SEO) 기준에 맞춰 여행 상품명을 정제하고 재창조하는 마케팅 자동화 전문가입니다.
 제공된 정형 데이터를 바탕으로 가이드라인을 완벽히 준수하는 서로 다른 스타일의 새로운 상품명 5개를 생성하세요.
@@ -58,10 +62,10 @@ def make_batch_prompt(data):
 
 [네이버 쇼핑 상품명 가이드라인]
 1. 글자 수: 공백 포함 최소 25자 ~ 최대 42자 사이로 매끄럽게 구성하세요.
-2. 금지어 규칙: 원본명에 있는 '신상품', '세이브', '특가', 특수문자(★, # 등)는 절대 새로 만드는 상품명에 포함하지 마십시오.
-3. 출발지 조건 규칙: 
-   - [지정 출발공항]이 존재할 경우: 반드시 상품명 맨 앞에 대괄호 형태로 배치한다. (예: [대구출발], [부산출발])
-   - [지정 출발공항]이 '없음'일 경우: '기본출발', '전국출발' 같은 문구를 임의로 조작해서 넣지 말고 무조건 곧바로 지역명/브랜드명으로 상품명을 시작한다.
+2. 금지어 규칙: 원본명에 있는 '신상품', '세이브', '특가', '대박' 같은 수식어나 특수문자(★, # 등)는 절대 새로 만드는 상품명에 포함하지 마십시오.
+3. 출발지 배치 조건: 
+   - 지정 출발지가 존재할 경우: 반드시 상품명 맨 앞에 글자 분리 없이 결합된 대괄호 형태로 시작합니다. (예시: [{clean_airport if airport != "없음" else ""}] )
+   - 지정 출발지가 '없음'일 경우: 무조건 곧바로 지역명/브랜드명으로 상품명을 시작합니다.
 4. 포맷: 문장이 아닌 명사형 키워드의 깔끔한 띄어쓰기 조합으로 구성한다.
 
 반드시 아래 JSON 포맷으로만 응답하세요. 다른 설명은 생략합니다.
@@ -98,18 +102,33 @@ async def fetch_live_llm_title(p, semaphore, runtime_cache_check, llm_results):
             res_json = json.loads(response.choices[0].message.content)
             options = [res_json.get(f"option_{i}", "").strip() for i in range(1, 6)]
             
-            # 💡 [★ 하드웨어 스크립트 가드 추가] 출발공항 누락 대비 무조건 보정 엔진
+            # 💡 [★ 하드웨어 스크립트 가드 수리] 대구 [출발], [대구출발] 쪼개짐 현상 완전 방어 자동 보정기
             airport = p.get('departure_airport', "없음")
             if airport != "없음" and airport:
+                clean_airport = airport.replace("[", "").replace("]", "").strip() # ex) 대구출발
+                city_name = clean_airport.replace("출발", "").strip() # ex) 대구
+                
                 fixed_options = []
                 for opt in options:
-                    if not opt.startswith(airport):
-                        # 대괄호를 뺀 텍스트 매칭 및 트레일링 공백 등 예외 정제
-                        clean_airport = airport.replace("[", "").replace("]", "").strip()
-                        clean_opt = opt.replace(airport, "").replace(clean_airport, "").strip()
-                        fixed_options.append(f"{airport} {clean_opt}")
-                    else:
+                    # AI가 이미 완벽하게 [대구출발]로 시작했다면 통과
+                    if opt.startswith(airport):
                         fixed_options.append(opt)
+                    else:
+                        # 대구 [출발], [대구] 출발, 대구출발 등 AI가 망쳐놓은 모든 출발지 텍스트 패턴 패턴 강제 추출 및 제거
+                        bad_patterns = [
+                            airport, clean_airport, f"{city_name} [출발]", f"[{city_name}] 출발", 
+                            f"[{city_name} 출발]", f"[{city_name}출발]", city_name, "출발"
+                        ]
+                        
+                        clean_opt = opt
+                        for pattern in bad_patterns:
+                            clean_opt = clean_opt.replace(pattern, "")
+                        
+                        # 특수문자나 찌꺼기 공백 다듬기
+                        clean_opt = re.sub(r'^[ \t\s\[\]\-\/]+', '', clean_opt).strip()
+                        
+                        # 깔끔하게 정상 포맷인 [대구출발] 을 맨 앞에 강제 결합
+                        fixed_options.append(f"{airport} {clean_opt}")
                 options = fixed_options
             
             # 새롭게 정의된 완화 필터로 사후 검증 진행
@@ -225,9 +244,10 @@ async def run_crawler():
             pid = str(r.get("ID", "")).strip()
             if pid:
                 t_opts = [str(r.get(f"네이버_상품명_{i}", "")).strip() for i in range(1, 6)]
-                if not any(t_opts) or any("[⚠️가이드미달]" in opt for opt in t_opts): continue
+                # 기존 캐시 중 미달마크가 있거나, AI 버그(대구 [출발] 등)가 포함된 행은 스킵하고 전량 재생성 대상으로 분류합니다.
+                if not any(t_opts) or any("[⚠️가이드미달]" in opt or " [출발]" in opt for opt in t_opts): continue
                 existing_titles_dict[pid] = t_opts
-        print(f"✅ 정상 수집된 기존 상품 {len(existing_titles_dict)}개를 캐싱했습니다. (미달 본은 자동 리셋 대상)")
+        print(f"✅ 정상 수집된 기존 상품 {len(existing_titles_dict)}개를 캐싱했습니다. (미달 본 및 포맷 오류 본 자동 리셋)")
     except Exception:
         print("⚠️ 기존 github2 캐시가 없거나 비어있습니다. 전수 조사로 진행합니다.")
 
@@ -285,7 +305,7 @@ async def run_crawler():
     if not raw_products:
         print("ℹ️ 수집된 상품이 없습니다."); return
 
-    print(f"📦 총 {len(raw_products)}개 상품 중 신규 및 미달 대상 실시간 갱신 돌입...")
+    print(f"📦 총 {len(raw_products)}개 상품 중 신규 및 오류 대상 실시간 갱신 돌입...")
     runtime_cache_check = {}
     llm_results = {}
     
@@ -333,7 +353,7 @@ async def run_crawler():
             sheet = doc.worksheet("github2")
             sheet.clear()
             sheet.update('A1', [df.columns.values.tolist()] + df.values.tolist())
-            print(f"✅ 구글 시트 github2 반영 완료 (가이드미달 박멸 완결판)")
+            print(f"✅ 구글 시트 github2 반영 완료 (가이드미달 및 공항 띄어쓰기 오류 전면 박멸)")
         except Exception as e:
             print(f"❌ 시트 반영 실패: {e}")
 
