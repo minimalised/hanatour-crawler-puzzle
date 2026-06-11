@@ -1,13 +1,13 @@
 name: Daily Hanatour Crawling (Batch v2)
 
 on:
-  workflow_dispatch:      # 수동 실행 버튼 활성화
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
     container:
-      image: mcr.microsoft.com/playwright:v1.60.0-noble 
+      image: mcr.microsoft.com/playwright:v1.60.0-jammy
 
     steps:
       - name: Checkout code
