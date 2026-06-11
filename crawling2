@@ -325,7 +325,7 @@ async def run_crawler():
         target_spreadsheet_id = os.environ.get("TARGET_SPREADSHEET_ID", source_spreadsheet_id)
         try:
             doc = gc.open_by_key(target_spreadsheet_id)
-            sheet = doc.worksheet("github")
+            sheet = doc.worksheet("github2")
             sheet.clear()
             sheet.update(values=[df.columns.values.tolist()] + df.values.tolist(), range_name='A1')
             print(f"✅ 구글 시트 반영 완료 (상품 가짓수 5개 확장 버전)")
