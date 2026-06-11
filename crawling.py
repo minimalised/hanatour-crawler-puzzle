@@ -80,6 +80,17 @@ async def process_single_product(item, target_region, target_airport, current_ur
         title_el = await main_info.query_selector(".item_title")
         full_title = (await title_el.inner_text()).strip() if title_el else "제목 없음"
 
+        # 💡 [보완] 시트상 출발공항이 '없음'이거나 부실하게 들어와도, URL이나 타이틀에서 매칭하여 보정합니다.
+        if target_airport == "없음" or not target_airport:
+            if "[청주출발]" in full_title or "depCityCd=CJJ" in current_url:
+                target_airport = "[청주출발]"
+            elif "[제주출발]" in full_title or "depCityCd=CJU" in current_url:
+                target_airport = "[제주출발]"
+            elif "[부산출발]" in full_title or "depCityCd=PUS" in current_url:
+                target_airport = "[부산출발]"
+            elif "[대구출발]" in full_title or "depCityCd=TAE" in current_url:
+                target_airport = "[대구출발]"
+
         price_el = await main_info.query_selector(".price")
         price_raw = await price_el.inner_text() if price_el else "0"
         price = "".join(filter(str.isdigit, price_raw))
@@ -224,7 +235,6 @@ async def run_crawler():
                 t2 = str(r.get("네이버_상품명_2", "")).strip()
                 t3 = str(r.get("네이버_상품명_3", "")).strip()
                 
-                # 💡 보완: ID는 시트에 기재되어 있으나 생성 상품명 3개가 전부 비어있다면 캐시 저장을 패스합니다.
                 if not t1 and not t2 and not t3:
                     continue
                     
@@ -253,7 +263,8 @@ async def run_crawler():
             
             try:
                 print(f"🔄 {target_region} (출발: {target_airport}) 페이지 로딩 중...")
-                await page.goto(current_url, wait_until="domcontentloaded", timeout=30000)
+                # 💡 [안정성 강화] Ajax 호출 완료 시점 동기화를 위해 networkidle 옵션을 사용합니다.
+                await page.goto(current_url, wait_until="networkidle", timeout=30000)
                 
                 try:
                     await page.wait_for_selector(".option_wrap.result .count em", timeout=10000)
@@ -326,7 +337,9 @@ async def run_crawler():
                     doc = gc.open_by_key(target_spreadsheet_id)
                     sheet = doc.worksheet(worksheet_name)
                     sheet.clear()  
-                    sheet.update(values=data_to_upload, range_name='A1')
+                    
+                    # 💡 [gspread 최신 규격 반영] range_name을 첫 인자로, 데이터를 두 번째 인자로 배치
+                    sheet.update('A1', data_to_upload)
                     print(f"✅ 성공: Secret 시트 [{doc.title}] ({target_spreadsheet_id}) 업데이트 완료")
                 except Exception as sheet_error:
                     print(f"⚠️ 시트({target_spreadsheet_id}) 업데이트 실패: {sheet_error}")
