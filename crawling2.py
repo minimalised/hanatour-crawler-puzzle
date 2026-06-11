@@ -19,7 +19,7 @@ def validate_naver_title(title):
     """네이버 쇼핑 상품명 가이드라인 만족 여부 검증"""
     if not title:
         return False
-    # 💡 글자 수 검증 조건 변경 (공백 포함 30자 이상 ~ 45자 이하)
+    # 글자 수 검증 조건 (공백 포함 30자 이상 ~ 45자 이하)
     if not (30 <= len(title) <= 45):
         return False
     # 단어 중복 검증 (띄어쓰기 기준 동일 단어 2회 이상 등장 금지)
@@ -39,7 +39,7 @@ def make_batch_prompt(data):
     if data['departure_airport'] != "없음":
         departure_context = f"- 지정 출발공항: {data['departure_airport']} (반드시 상품명 맨 앞에 '{data['departure_airport']}' 형식으로 고정 배치할 것)"
     else:
-        departure_context = "- 지정 출발공항: 없음 (★주의: 상품명 맨 앞에 '[기본출발]', '[전국출발]' 등 어써한 출발 관련 문구도 절대 넣지 말고, 곧바로 '지역명'부터 시작할 것)"
+        departure_context = "- 지정 출발공항: 없음 (★주의: 상품명 맨 앞에 '[기본출발]', '[전국출발]' 등 어떠한 출발 관련 문구도 절대 넣지 말고, 곧바로 '지역명'부터 시작할 것)"
 
     return f"""당신은 네이버 쇼핑 검색 최적화(SEO) 기준에 맞춰 여행 상품명을 정제하고 재창조하는 마케팅 자동화 전문가입니다.
 제공된 정형 데이터를 바탕으로 가이드라인을 완벽히 준수하는 서로 다른 스타일의 새로운 상품명 5개를 생성하세요.
@@ -71,7 +71,7 @@ def make_batch_prompt(data):
 }}"""
 
 # -------------------------------------------------------------
-# 기존 개별 수집 로직
+# 기존 개별 수집 로직 (버전1의 안정적인 추출 로직 적용)
 # -------------------------------------------------------------
 async def process_single_product_raw(item, target_region, target_airport, current_url):
     try:
@@ -151,7 +151,7 @@ async def run_crawler():
     except Exception as auth_error:
         print(f"❌ 구글 API 인증 실패: {auth_error}"); return
 
-    # 💡 하드코딩 완전 제거: 오직 환경 변수로만 작동하며, 없을 경우 에러 메시지와 함께 종료됩니다.
+    # 하드코딩 완전 제거
     source_spreadsheet_id = os.environ.get("SOURCE_SPREADSHEET_ID")
     if not source_spreadsheet_id:
         print("❌ 에러: 환경 변수 'SOURCE_SPREADSHEET_ID'가 설정되어 있지 않습니다.")
@@ -164,44 +164,101 @@ async def run_crawler():
         print(f"❌ 소스 스프레드시트 로드 실패: {e}")
         return
 
-    data_rows = source_sheet.get_all_values()[1:]
+    all_rows = source_sheet.get_all_values()
+    data_rows = all_rows[1:]
     
     target_tasks = []
     for row in data_rows:
-        if len(row) >= 1 and row[0].startswith("http"):
-            target_tasks.append({
-                "url": row[0].strip(),
-                "sheet_region": row[1].strip() if len(row) > 1 and row[1].strip() else "지역명 미상",
-                "sheet_airport": row[2].strip() if len(row) > 2 and row[2].strip() else "없음"
-            })
+        if len(row) >= 1:
+            url_clean = row[0].strip()  # 💡 방어 코드: 구글 시트 내 보이지 않는 공백 제거
+            if url_clean.startswith("http"):
+                target_tasks.append({
+                    "url": url_clean,
+                    "sheet_region": row[1].strip() if len(row) > 1 and row[1].strip() else "지역명 미상",
+                    "sheet_airport": row[2].strip() if len(row) > 2 and row[2].strip() else "없음"
+                })
+                
+    print(f"✅ 총 {len(target_tasks)}개의 유효 타겟 상품 라인을 확보했습니다.")
 
-    # 캐싱 데이터 로드 (github2에서 로드)
+    # 캐싱 데이터 로드 (github2에서 로드 및 공란 예외 필터 처리)
     existing_titles_dict = {}
     try:
         github_sheet = source_doc.worksheet("github2")
         for r in github_sheet.get_all_records():
-            if r.get("ID"):
-                existing_titles_dict[str(r["ID"])] = [r.get(f"네이버_상품명_{i}", "") for i in range(1, 6)]
+            pid = str(r.get("ID", "")).strip()
+            if pid:
+                t_opts = [str(r.get(f"네이버_상품명_{i}", "")).strip() for i in range(1, 6)]
+                # 💡 ID는 존재하지만 5개 컬럼의 텍스트 내용이 아예 없는 경우는 기수집 캐시에서 제외(새로 빌드 유도)
+                if not any(t_opts):
+                    continue
+                existing_titles_dict[pid] = t_opts
+        print(f"✅ 기수집된 기존 상품 {len(existing_titles_dict)}개를 메모리에 캐싱했습니다. (공란 제외 완료)")
     except Exception:
         print("⚠️ 기존 github2 캐시가 없거나 비어있습니다. 전수 조사로 진행합니다.")
 
-    # 1단계: Playwright 고속 크롤링
+    # 1단계: Playwright 고속 크롤링 (★ 버전1의 스마트 동적 브라우저 핸들링 완벽 이식)
     raw_products = []
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
-        context = await browser.new_context(viewport={'width': 1280, 'height': 1024})
+        context = await browser.new_context(
+            viewport={'width': 1280, 'height': 1024},
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+        )
         page = await context.new_page()
 
         for task in target_tasks:
+            current_url = task["url"]
+            target_region = task["sheet_region"]
+            target_airport = task["sheet_airport"]
+            
             try:
-                await page.goto(task["url"], wait_until="domcontentloaded", timeout=30000)
-                final_items = await page.query_selector_all(".prod_list_wrap ul.type > li")
+                print(f"🔄 {target_region} (출발: {target_airport}) 페이지 로딩 중...")
+                await page.goto(current_url, wait_until="domcontentloaded", timeout=30000)
                 
-                sc_tasks = [process_single_product_raw(item, task["sheet_region"], task["sheet_airport"], task["url"]) for item in final_items]
+                # 💡 동적 데이터를 기다려주는 동기화 구문 (버전1 완벽 이식)
+                try:
+                    await page.wait_for_selector(".option_wrap.result .count em", timeout=10000)
+                except Exception:
+                    pass
+
+                total_count = 20  
+                try:
+                    count_element = await page.query_selector(".option_wrap.result .count em")
+                    if count_element:
+                        count_text = (await count_element.inner_text()).strip()
+                        if count_text.isdigit():
+                            total_count = int(count_text)
+                            print(f"   ↳ 🎯 총 상품 수 동기화 성공: [{total_count}개]")
+                except Exception as e:
+                    print(f"   ⚠️ 총 상품 수 추출 실패 (기본 20개 모드로 작동): {e}")
+
+                needed_scrolls = (total_count - 1) // 20 if total_count > 20 else 0
+                
+                if needed_scrolls > 0:
+                    print(f"   ↳ ⏳ 전수 노출을 위해 정확히 {needed_scrolls}번만 스마트 스크롤을 내립니다.")
+                    for scroll_step in range(1, needed_scrolls + 1):
+                        await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                        await asyncio.sleep(2.0)
+                        
+                        await page.evaluate("window.scrollTo(0, document.body.scrollHeight - 300)")
+                        await asyncio.sleep(0.3)
+                        await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                        
+                        current_items = await page.query_selector_all(".prod_list_wrap ul.type > li")
+                        if len(current_items) >= total_count:
+                            break
+
+                await asyncio.sleep(1.0)
+
+                final_items = await page.query_selector_all(".prod_list_wrap ul.type > li")
+                print(f"📦 [확인] 최종 수집된 타겟 엘리먼트 총 {len(final_items)}개! 조건부 병렬 처리를 시작합니다.")
+                
+                sc_tasks = [process_single_product_raw(item, target_region, target_airport, current_url) for item in final_items]
                 batch_results = await asyncio.gather(*sc_tasks)
                 raw_products.extend([res for res in batch_results if res is not None])
+                
             except Exception as e:
-                print(f"❌ {task['url']} 크롤링 에러: {e}")
+                print(f"❌ {current_url} 크롤링 에러: {e}")
         await browser.close()
 
     if not raw_products:
@@ -272,7 +329,6 @@ async def run_crawler():
                         res_json = json.loads(content_raw)
                         
                         options = [res_json.get(f"option_{i}", "").strip() for i in range(1, 6)]
-                        # 유연해진 30~45자 기준으로 검증 수행
                         validated_options = [opt if validate_naver_title(opt) else f"[⚠️가이드미달] {opt}" for opt in options]
                         
                         llm_results[c_id] = validated_options
@@ -324,7 +380,6 @@ async def run_crawler():
                         "네이버_상품명_1", "네이버_상품명_2", "네이버_상품명_3", "네이버_상품명_4", "네이버_상품명_5"]
         df = df[column_order]
         
-        # 💡 TARGET_SPREADSHEET_ID가 지정되지 않았을 경우 source_spreadsheet_id를 활용합니다.
         target_spreadsheet_id = os.environ.get("TARGET_SPREADSHEET_ID", source_spreadsheet_id)
         try:
             doc = gc.open_by_key(target_spreadsheet_id)
@@ -335,8 +390,5 @@ async def run_crawler():
         except Exception as e:
             print(f"❌ 시트 반영 실패: {e}")
 
-# -------------------------------------------------------------
-# 표준 비동기 루프 호출 구조
-# -------------------------------------------------------------
 if __name__ == "__main__":
     asyncio.run(run_crawler())
