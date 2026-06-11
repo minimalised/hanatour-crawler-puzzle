@@ -13,48 +13,57 @@ from openai import AsyncOpenAI
 openai_client = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY", "YOUR_LOCAL_API_KEY"))
 
 async def generate_naver_titles_llm(data):
-    if data['departure_airport'] != "없음":
-        departure_context = f"- 지정 출발공항: {data['departure_airport']} (반드시 상품명 맨 앞에 '{data['departure_airport']}' 형식으로 고정 배치할 것)"
+    # 1. 출발 공항 변수 명확히 정의 및 컨텍스트 고도화
+    airport = data.get('departure_airport', "없음")
+    
+    if airport != "없음" and airport:
+        departure_context = f"- 지정 출발공항: {airport}\n(★필수 규칙: 생성하는 모든 상품명의 '맨 첫 단어'는 무조건 대괄호를 포함한 '{airport}'로 시작해야 합니다. 다른 공항명은 절대 넣지 마십시오.)"
+        # 예시 문구도 현재 출발 공항에 맞게 동적으로 가변 처리하여 오염 방지
+        example_1 = f"{airport} 방콕 파타야 5일 전일정 5성호텔 산호섬투어"
+        example_2 = f"{airport} 다낭 5일 가족여행 가성비 패키지 추천"
+        example_3 = f"{airport} 세부 4일 초특급리조트 호핑투어 힐링"
     else:
-        departure_context = "- 지정 출발공항: 없음 (★주의: 상품명 맨 앞에 '[기본출발]', '[기본출발지]', '[출발지없음]' 등 어떠한 출발 관련 문구도 절대 넣지 말고, 곧바로 '지역명'부터 시작할 것)"
+        departure_context = "- 지정 출발공항: 없음\n(★필수 규칙: 상품명 맨 앞에 '[기본출발]', '[전국출발]', '[출발지없음]' 등 어떠한 출발 관련 문구도 절대 넣지 말고, 곧바로 '지역명'부터 시작할 것)"
+        example_1 = "방콕 파타야 5일 전일정 5성호텔 산호섬투어"
+        example_2 = "다낭 5일 가족여행 가성비 패키지 추천"
+        example_3 = "세부 4일 초특급리조트 호핑투어 힐링"
 
-    prompt = f"""
-당신은 네이버 쇼핑 검색 최적화(SEO) 기준에 맞춰 여행 상품명을 정제하고 재창조하는 마케팅 자동화 전문가입니다.
-제공된 정형 데이터를 바탕으로 가이드라인을 완벽히 준수하는 새로운 상품명 3개를 생성하세요.
+    prompt = f"""당신은 네이버 쇼핑 검색 최적화(SEO) 기준에 맞춰 여행 상품명을 정제하고 재창조하는 마케팅 자동화 전문가입니다.
+제공된 정형 데이터를 바탕으로 가이드라인을 완벽히 준수하는 서로 다른 스타일의 새로운 상품명 3개를 생성하세요.
 
 [입력 데이터]
-- 기준 상품명: {data['full_title']}
-- 여행 지역: {data['region']}
-- 기간: {data['duration']}
+- 기준 상품명: {data.get('full_title', '제목없음')}
+- 여행 지역: {data.get('region', '지역명 미상')}
+- 기간: {data.get('duration', '기간 미상')}
 {departure_context}
-- 핵심 설명: {data['description']}
-- 추출 키워드: {data['hashtags']}
+- 핵심 설명: {data.get('description', '')}
+- 추출 키워드: {data.get('hashtags', '')}
 
 [네이버 쇼핑 상품명 가이드라인]
 1. 글자 수: 공백 포함 최소 25자 ~ 최대 35자 사이로 구성한다. (40자 절대 초과 금지)
-2. 중복 제거: 상품명 내부에서 동일한 단어(ex: 방콕, 여행, 패키지 등)가 2회 이상 중복 나열되는 것을 절대 금지한다.
-3. 정제성: '신상품', '세이브', '특가', '대박', '★' 같은 홍보성 문구나 특수문자는 절대 포함하지 않는다.
-4. 출발지 조건 규칙: 
-   - [지정 출발공항]이 존재할 경우: 반드시 상품명 맨 앞에 대괄호 형태로 배치한다. (예: [대구출발], [부산출발])
-   - [지정 출발공항]이 '없음'일 경우: '기본출발', '전국출발' 같은 문구를 임의로 조작해서 넣지 말고 **무조건 곧바로 지역명/브랜드명으로 상품명을 시작**한다.
+2. 중복 제거: 상품명 내부에서 동일한 단어가 2회 이상 중복 나열되는 것을 절대 금지한다.
+3. 정제성: 원본 상품명에 있는 '신상품', '세이브', '특가', '대박', 특수문자(★, # 등)는 절대 새로 만드는 상품명에 포함하지 마십시오.
+4. 출발지 조건 규칙 (★최우선 순위): 
+   - [지정 출발공항]이 '{airport}'로 존재할 경우: 3개의 옵션 모두 무조건 맨 앞에 '{airport}' 가 와야 합니다. 부산, 대구 등 다른 공항명과 절대로 헷갈리거나 섞이지 마십시오.
+   - [지정 출발공항]이 '없음'일 경우: 절대로 임의의 출발 문구를 조작해 넣지 말고 무조건 곧바로 지역명/브랜드명으로 상품명을 시작한다.
 5. 포맷: 문장이 아닌 명사형 키워드의 깔끔한 띄어쓰기 조합으로 구성한다.
 
 반드시 아래 JSON 포맷으로만 응답하세요. 다른 설명은 생략합니다.
 {{
-  "option_1": "남해안 일주 4일 가족여행 고품격 효도 패키지",
-  "option_2": "제주도 3일 특급호텔 식도락 여행 추천",
-  "option_3": "강원도 여행 3일 가족휴양 고품격 숙소 별미"
+  "option_1": "{example_1}",
+  "option_2": "{example_2}",
+  "option_3": "{example_3}"
 }}
 """
     try:
         response = await openai_client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "You are a helpful assistant that outputs JSON."},
+                {"role": "system", "content": "You are a helpful assistant that outputs JSON. 지시사항 중 출발 공항 규칙을 절대적으로 준수하세요."},
                 {"role": "user", "content": prompt}
             ],
             response_format={"type": "json_object"},
-            temperature=0,
+            temperature=0,  # 0으로 고정하여 창의성보다 정확도 우선시
             seed=42
         )
         
@@ -66,7 +75,7 @@ async def generate_naver_titles_llm(data):
         )
     except Exception as e:
         print(f"❌ LLM 상품명 생성 중 에러 발생: {e}")
-        return f"[Error] {data['full_title']}", f"[Error] {data['region']}", f"[Error] {data['full_title']}"
+        return f"[Error] {data.get('full_title', '')}", f"[Error] {data.get('region', '')}", f"[Error] {data.get('full_title', '')}"
 
 
 async def process_single_product(item, target_region, target_airport, current_url, existing_titles_dict, runtime_titles_dict):
