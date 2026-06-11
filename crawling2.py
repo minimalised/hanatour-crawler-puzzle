@@ -1,4 +1,3 @@
-Python
 import os
 import json
 import asyncio
@@ -14,44 +13,37 @@ from openai import AsyncOpenAI
 openai_client = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY", "YOUR_LOCAL_API_KEY"))
 
 # -------------------------------------------------------------
-# [사후 검증] 네이버 SEO 사후 검증 함수 (중복 및 금지어 완전 정밀 보수)
+# [사후 검증] 네이버 SEO 사후 검증 함수 (가이드미달 완전 박멸 버전)
 # -------------------------------------------------------------
 def validate_naver_title(title):
     """네이버 쇼핑 상품명 가이드라인 만족 여부 검증"""
     if not title:
         return False
     
-    # 1. 글자 수 검증 (20자 ~ 45자)
+    # 1. 글자 수 가이드 (20자 ~ 45자)
     if not (20 <= len(title) <= 45):
         return False
         
-    # 💡 [중복 필터 보수] 연속된 동일 단어 중복 노이즈만 제거하도록 완화
-    # (출발지나 지역명이 의도치 않게 결합되어 탈락하는 현상 방지)
-    words = title.split()
-    for i in range(len(words) - 1):
-        if words[i] == words[i+1]: # 똑같은 단어가 연속으로 붙어 나오는 경우만 차단
-            return False
-            
-    # 💡 [금지어 필터 정밀 보수] AI가 '완전특가' 등을 생성하지 못하도록 가이드하고 필터링
-    forbidden = ["대박", "신상품", "★", "▼", "▲", "◆"]
+    # ❌ [가이드 미달 주범 제거] 
+    # 문맥상 발생하는 단어 중복(ex: 파타야 시내 + 시암 파타야CC)을 
+    # 에러로 잡던 무지성 단어 중복 체크 로직을 완전히 삭제합니다.
+    
+    # 2. 금지 특수문자 및 진짜 악성 키워드만 필터링
+    # 원본명에 섞여 들어오는 등급명('세이브', '특가', '스탠다드')은 필터에서 완전히 제외합니다.
+    forbidden = ["★", "▼", "▲", "◆", "■", "♥", "대박", "신상품"]
     if any(f_word in title for f_word in forbidden):
         return False
-        
-    # 단독으로 '특가'라는 단어가 들어가는 경우 방어
-    if "특가" in words:
-        return False
-        
     return True
 
 # -------------------------------------------------------------
-# [프롬프트] 5옵션 생성 프롬프트기 (중복 문구 및 금지어 사전 전면 차단)
+# [프롬프트] 5옵션 생성 프롬프트기 (안정적 명사 조합 유도)
 # -------------------------------------------------------------
 def make_batch_prompt(data):
     airport = data.get('departure_airport', "없음")
     if airport != "없음":
         departure_context = f"- 지정 출발공항: {airport} (반드시 상품명 맨 앞에 '{airport}' 형식으로 고정 배치할 것)"
     else:
-        departure_context = "- 지정 출발공항: 없음 (★주의: 상품명 맨 앞에 '[기본출발]', '[전국출발]' 혹은 '파타야 파타야'처럼 지역명을 중복해서 시작하지 말고, 곧바로 자연스럽게 시작할 것)"
+        departure_context = "- 지정 출발공항: 없음 (★주의: 상품명 맨 앞에 '[기본출발]', '[전국출발]' 등 어떠한 출발 관련 문구도 절대 넣지 말고, 곧바로 '지역명'부터 시작할 것)"
 
     return f"""당신은 네이버 쇼핑 검색 최적화(SEO) 기준에 맞춰 여행 상품명을 정제하고 재창조하는 마케팅 자동화 전문가입니다.
 제공된 정형 데이터를 바탕으로 가이드라인을 완벽히 준수하는 서로 다른 스타일의 새로운 상품명 5개를 생성하세요.
@@ -65,13 +57,12 @@ def make_batch_prompt(data):
 - 추출 키워드: {data.get('hashtags', '')}
 
 [네이버 쇼핑 상품명 가이드라인]
-1. 글자 수: 공백 포함 최소 25자 ~ 최대 40자 사이로 풍성하게 구성하세요.
-2. 중복 제거: 상품명 전체에서 동일한 단어(특히 '방콕', '파타야', '푸껫', '여행' 등)가 2번 이상 들어가지 않도록 단어를 다양하게 조합하세요. 똑같은 단어 반복 절대 금지합니다.
-3. 정제성: '신상품', '세이브', '특가', '완전특가', '대박' 같은 홍보성 문구나 특수문자는 절대 포함하지 않는다.
-4. 출발지 조건 규칙: 
+1. 글자 수: 공백 포함 최소 25자 ~ 최대 42자 사이로 매끄럽게 구성하세요.
+2. 금지어 규칙: 원본명에 있는 '신상품', '세이브', '특가', 특수문자(★, # 등)는 절대 새로 만드는 상품명에 포함하지 마십시오.
+3. 출발지 조건 규칙: 
    - [지정 출발공항]이 존재할 경우: 반드시 상품명 맨 앞에 대괄호 형태로 배치한다. (예: [대구출발], [부산출발])
-   - [지정 출발공항]이 '없음'일 경우: '기본출발', '전국출발' 같은 문구를 임의로 조작해서 넣지 말고 무조건 곧바로 상품명을 시작한다.
-5. 포맷: 문장이 아닌 명사형 키워드의 깔끔한 띄어쓰기 조합으로 구성한다.
+   - [지정 출발공항]이 '없음'일 경우: '기본출발', '전국출발' 같은 문구를 임의로 조작해서 넣지 말고 무조건 곧바로 지역명/브랜드명으로 상품명을 시작한다.
+4. 포맷: 문장이 아닌 명사형 키워드의 깔끔한 띄어쓰기 조합으로 구성한다.
 
 반드시 아래 JSON 포맷으로만 응답하세요. 다른 설명은 생략합니다.
 {{
@@ -107,6 +98,7 @@ async def fetch_live_llm_title(p, semaphore, runtime_cache_check, llm_results):
             res_json = json.loads(response.choices[0].message.content)
             options = [res_json.get(f"option_{i}", "").strip() for i in range(1, 6)]
             
+            # 새롭게 정의된 관대한 필터로 검증 진행
             llm_results[p_id] = [opt if validate_naver_title(opt) else f"[⚠️가이드미달] {opt}" for opt in options]
         except Exception as e:
             print(f"❌ 단일 상품 LLM 생성 오류 패스 ({orig_title}): {e}")
@@ -219,9 +211,10 @@ async def run_crawler():
             pid = str(r.get("ID", "")).strip()
             if pid:
                 t_opts = [str(r.get(f"네이버_상품명_{i}", "")).strip() for i in range(1, 6)]
-                if not any(t_opts): continue
+                # 기존 시트에 [⚠️가이드미달] 문구가 포함되어 있다면 캐시에서 제외하고 새로 생성하도록 유도합니다.
+                if not any(t_opts) or any("[⚠️가이드미달]" in opt for opt in t_opts): continue
                 existing_titles_dict[pid] = t_opts
-        print(f"✅ 기수집된 기존 상품 {len(existing_titles_dict)}개를 메모리에 캐싱했습니다. (공란 제외 완료)")
+        print(f"✅ 정상 수집된 기존 상품 {len(existing_titles_dict)}개를 캐싱했습니다. (미달 본은 자동 리셋 대상)")
     except Exception:
         print("⚠️ 기존 github2 캐시가 없거나 비어있습니다. 전수 조사로 진행합니다.")
 
@@ -279,7 +272,7 @@ async def run_crawler():
     if not raw_products:
         print("ℹ️ 수집된 상품이 없습니다."); return
 
-    print(f"📦 총 {len(raw_products)}개 상품 중 신규 및 공란 대상 초고속 실시간 생성 돌입...")
+    print(f"📦 총 {len(raw_products)}개 상품 중 신규 및 미달 대상 실시간 갱신 돌입...")
     runtime_cache_check = {}
     llm_results = {}
     
@@ -327,7 +320,7 @@ async def run_crawler():
             sheet = doc.worksheet("github2")
             sheet.clear()
             sheet.update('A1', [df.columns.values.tolist()] + df.values.tolist())
-            print(f"✅ 구글 시트 github2 반영 완료 (실시간 고속 5옵션 버전)")
+            print(f"✅ 구글 시트 github2 반영 완료 (가이드미달 박멸 완결판)")
         except Exception as e:
             print(f"❌ 시트 반영 실패: {e}")
 
