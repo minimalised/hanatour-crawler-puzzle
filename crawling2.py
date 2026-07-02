@@ -132,7 +132,7 @@ async def fetch_live_llm_title(p, semaphore, runtime_cache_check, llm_results):
                 options = fixed_options
             
             # 새롭게 정의된 완화 필터로 사후 검증 진행
-            llm_results[p_id] = [opt if validate_naver_title(opt) else f"[⚠️가이드미달] {opt}" for opt in options]
+            llm_results[p_id] = options
         except Exception as e:
             print(f"❌ 단일 상품 LLM 생성 오류 패스 ({orig_title}): {e}")
             llm_results[p_id] = ["[Error]"] * 5
