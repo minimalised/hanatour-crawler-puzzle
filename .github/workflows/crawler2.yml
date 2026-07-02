@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     container:
       # 💡 기존 -jammy에서 GLIBC 2.38 이상을 기본 지원하는 최신 -noble(Ubuntu 24.04) 이미지로 전격 변경
-      image: mcr.microsoft.com/playwright:v1.60.0-noble
+      image: mcr.microsoft.com/playwright:v1.61.0-noble
 
     steps:
       - name: Checkout code
