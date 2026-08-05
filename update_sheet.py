@@ -36,7 +36,7 @@ bracket_pattern = re.compile(r"[\[\]\(\)]")
 
 
 # 도메인 변경 및 utm 파라미터 제거 함수
-def clean_and_replace_url(url, new_domain="https://unique.hanatour.com"):
+def clean_and_replace_url(url, new_domain="https://puzzle.hanatour.com"):
   if not url or not url.startswith("http"):
     return url
 
