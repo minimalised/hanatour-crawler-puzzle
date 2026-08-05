@@ -1,8 +1,6 @@
 name: "Google drive file sync"
 
 on:
-  schedule:
-    - cron: '30 23 * * *'  # 한국시간(KST) 기준 매일 아침 08:30 실행 (UTC 23:30)
   workflow_dispatch:
 
 jobs:
