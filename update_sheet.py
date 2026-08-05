@@ -25,90 +25,94 @@ source_sheet = doc.worksheet("호텔상품리스트")
 all_rows = source_sheet.get_all_values()
 
 if not all_rows:
-  print("데이터가 없습니다.")
-  exit(0)
+    print("데이터가 없습니다.")
+    exit(0)
 
-# 3. 지정된 열 가져오기, B열 괄호 제거, F열 도메인 변경 및 utm 파라미터 제거, K열 조건 처리
+# 3. 지정된 열 가져오기, B열 괄호 제거, F열 도메인 변경 및 새로운 utm 파라미터 적용, K열 조건 처리
 extracted_data = []
 
 # 대괄호 및 소괄호 [, ], (, ) 제거용 정규표현식
 bracket_pattern = re.compile(r"[\[\]\(\)]")
 
 
-# 도메인 변경 및 utm 파라미터 제거 함수
+# 도메인 변경, 기존 utm 제거 후 새로운 utm 파라미터 추가 함수
 def clean_and_replace_url(url, new_domain="https://puzzle.hanatour.com"):
-  if not url or not url.startswith("http"):
-    return url
+    if not url or not url.startswith("http"):
+        return url
 
-  parsed_url = urlparse(url)
-  target_parsed = urlparse(new_domain)
+    parsed_url = urlparse(url)
+    target_parsed = urlparse(new_domain)
 
-  # 쿼리 파라미터 분해
-  query_params = parse_qs(parsed_url.query, keep_blank_values=True)
+    # 1) 기존 쿼리 파라미터 분해
+    query_params = parse_qs(parsed_url.query, keep_blank_values=True)
 
-  # 'utm_'으로 시작하는 파라미터 제거
-  filtered_params = {
-      k: v for k, v in query_params.items() if not k.startswith("utm_")
-  }
+    # 2) 기존 'utm_'으로 시작하는 파라미터 제거
+    filtered_params = {
+        k: v for k, v in query_params.items() if not k.startswith("utm_")
+    }
 
-  # 쿼리 문자열 재구성
-  new_query = urlencode(filtered_params, doseq=True)
+    # 3) 새로운 utm 파라미터 추가 (주석 처리된 예시 형태 반영)
+    filtered_params["utm_source"] = ["naver"]
+    filtered_params["utm_medium"] = ["ns"]
+    filtered_params["utm_campaign"] = ["hotel"]
+    filtered_params["utm_term"] = ["{query}"]
 
-  # scheme(https), netloc(unique.hanatour.com) 및 정돈된 query 적용 후 재조합
-  updated_url = urlunparse((
-      target_parsed.scheme,
-      target_parsed.netloc,
-      parsed_url.path,
-      parsed_url.params,
-      new_query,
-      parsed_url.fragment,
-  ))
-  return updated_url
+    # 4) 쿼리 문자열 재구성 ({query} 템플릿 유지 처리)
+    new_query = urlencode(filtered_params, doseq=True, safe="{}")
+
+    # scheme(https), netloc(puzzle.hanatour.com) 및 새 쿼리 적용 후 재조합
+    updated_url = urlunparse((
+        target_parsed.scheme,
+        target_parsed.netloc,
+        parsed_url.path,
+        parsed_url.params,
+        new_query,
+        parsed_url.fragment,
+    ))
+    return updated_url
 
 
 for idx, row in enumerate(all_rows):
 
-  def get_val(i):
-    return row[i] if i < len(row) else ""
+    def get_val(i):
+        return row[i] if i < len(row) else ""
 
-  col_a = get_val(0)  # A열: id
-  col_b = get_val(1)  # B열: 상품명
-  col_c = get_val(2)  # C열: 가격
-  # col_d (혜택가격) 제거됨
-  col_f = get_val(5)  # F열: 링크
-  col_h = get_val(7)  # H열: 이미지링크
-  col_k = get_val(10)  # K열: 분류/카테고리
+    col_a = get_val(0)   # A열: id
+    col_b = get_val(1)   # B열: 상품명
+    col_c = get_val(2)   # C열: 가격
+    col_f = get_val(5)   # F열: 링크
+    col_h = get_val(7)   # H열: 이미지링크
+    col_k = get_val(10)  # K열: 분류/카테고리
 
-  # 1행(헤더) 변경: 새로운 컬럼 구조에 맞게 헤더 생성
-  if idx == 0:
-    # A: id, B: title, C: price_pc, D: link, E: image_link, F: category_id(예시 헤더명)
+    # 1행(헤더) 변경: 새로운 컬럼 구조에 맞게 헤더 생성
+    if idx == 0:
+        extracted_data.append(
+            ["id", "title", "price_pc", "link", "image_link", "category_id"]
+        )
+        continue
+
+    # K열이 '국내숙박'인 경우 스킵
+    if col_k.strip() == "국내숙박":
+        continue
+
+    # B열 상품명에서 [, ], (, ) 제거
+    cleaned_b = bracket_pattern.sub("", col_b)
+
+    # F열 도메인 변경, 기존 utm 제거 및 새로운 utm 파라미터 적용
+    updated_f = clean_and_replace_url(col_f)
+
+    # 데이터 행 추가
     extracted_data.append(
-        ["id", "title", "price_pc", "link", "image_link", "category_id"]
+        [col_a, cleaned_b, col_c, updated_f, col_h, "50007258"]
     )
-    continue
-
-  # K열이 '국내숙박'인 경우 스킵
-  if col_k.strip() == "국내숙박":
-    continue
-
-  # B열 상품명에서 [, ], (, ) 제거
-  cleaned_b = bracket_pattern.sub("", col_b)
-
-  # F열 도메인 변경 및 utm 파라미터 제거
-  updated_f = clean_and_replace_url(col_f)
-
-  # A열: id, B열: title, C열: price_pc, D열: link, E열: image_link, F열: 고정 숫자(50007258)
-  extracted_data.append(
-      [col_a, cleaned_b, col_c, updated_f, col_h, "50007258"]
-  )
 
 # 4. Target 시트('호텔github')에 데이터 반영
 try:
-  target_sheet = doc.worksheet("호텔github")
+    target_sheet = doc.worksheet("호텔github")
 except gspread.exceptions.WorksheetNotFound:
-  target_sheet = doc.add_worksheet(
-      title="호텔github", rows="1000", cols="10"
-  )
+    target_sheet = doc.add_worksheet(
+        title="호텔github", rows="1000", cols="10"
+    )
 
 # 기존 내용 덮어쓰기
 target_sheet.clear()
