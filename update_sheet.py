@@ -51,7 +51,7 @@ def clean_and_replace_url(url, new_domain="https://puzzle.hanatour.com"):
         k: v for k, v in query_params.items() if not k.startswith("utm_")
     }
 
-    # 3) 새로운 utm 파라미터 추가 (주석 처리된 예시 형태 반영)
+    # 3) 새로운 utm 파라미터 추가
     filtered_params["utm_source"] = ["naver"]
     filtered_params["utm_medium"] = ["ns"]
     filtered_params["utm_campaign"] = ["hotel"]
@@ -98,12 +98,19 @@ for idx, row in enumerate(all_rows):
     # B열 상품명에서 [, ], (, ) 제거
     cleaned_b = bracket_pattern.sub("", col_b)
 
+    # C열 가격 데이터 숫자(int) 타입 변환
+    cleaned_c = col_c.replace(",", "").strip()  # 쉼표 및 공백 제거
+    try:
+        price_num = int(cleaned_c)              # 파이썬 정수 형변환
+    except ValueError:
+        price_num = col_c                       # 숫자가 아닌 문자열인 경우 예외 처리
+
     # F열 도메인 변경, 기존 utm 제거 및 새로운 utm 파라미터 적용
     updated_f = clean_and_replace_url(col_f)
 
     # 데이터 행 추가
     extracted_data.append(
-        [col_a, cleaned_b, col_c, updated_f, col_h, "50007258"]
+        [col_a, cleaned_b, price_num, updated_f, col_h, "50007258"]
     )
 
 # 4. Target 시트('호텔github')에 데이터 반영
@@ -116,6 +123,11 @@ except gspread.exceptions.WorksheetNotFound:
 
 # 기존 내용 덮어쓰기
 target_sheet.clear()
-target_sheet.update("A1", extracted_data)
+
+# USER_ENTERED 옵션을 지정해 파이썬 숫자(int)를 시트의 숫자 데이터 형태로 입력
+target_sheet.update("A1", extracted_data, value_input_option="USER_ENTERED")
+
+# C열(가격) 전체를 구글 시트 상에서 '숫자 포맷'으로 적용하여 작은따옴표(') 강제 제거
+target_sheet.format("C:C", {"numberFormat": {"type": "NUMBER", "pattern": "0"}})
 
 print(f"총 {len(extracted_data)}행 데이터 업데이트 완료!")
