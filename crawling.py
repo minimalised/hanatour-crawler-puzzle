@@ -17,11 +17,12 @@ async def generate_naver_titles_llm(data):
     airport = data.get('departure_airport', "없음")
     
     if airport != "없음" and airport:
-        departure_context = f"- 지정 출발공항: {airport}\n(★필수 규칙: 생성하는 모든 상품명의 '맨 첫 단어'는 무조건 대괄호를 포함한 '{airport}'로 시작해야 합니다. 다른 공항명은 절대 넣지 마십시오.)"
+        clean_airport = airport.replace("[", "").replace("]", "").strip()
+        departure_context = f"- 지정 출발공항: {clean_airport}\n(★필수 규칙: 생성하는 모든 상품명의 '맨 첫 단어'는 무조건 대괄호를 포함한 '[{clean_airport}]'로 시작해야 합니다. 다른 공항명은 절대 넣지 마십시오.)"
         # 예시 문구도 현재 출발 공항에 맞게 동적으로 가변 처리하여 오염 방지
-        example_1 = f"{airport} 방콕 파타야 5일 전일정 5성호텔 산호섬투어"
-        example_2 = f"{airport} 다낭 5일 가족여행 가성비 패키지 추천"
-        example_3 = f"{airport} 세부 4일 초특급리조트 호핑투어 힐링"
+        example_1 = f"[{clean_airport}] 방콕 파타야 5일 전일정 5성호텔 산호섬투어"
+        example_2 = f"[{clean_airport}] 다낭 5일 가족여행 가성비 패키지 추천"
+        example_3 = f"[{clean_airport}] 세부 4일 초특급리조트 호핑투어 힐링"
     else:
         departure_context = "- 지정 출발공항: 없음\n(★필수 규칙: 상품명 맨 앞에 '[기본출발]', '[전국출발]', '[출발지없음]' 등 어떠한 출발 관련 문구도 절대 넣지 말고, 곧바로 '지역명'부터 시작할 것)"
         example_1 = "방콕 파타야 5일 전일정 5성호텔 산호섬투어"
@@ -63,7 +64,7 @@ async def generate_naver_titles_llm(data):
                 {"role": "user", "content": prompt}
             ],
             response_format={"type": "json_object"},
-            temperature=0,  # 0으로 고정하여 창의성보다 정확도 우선시
+            temperature=0,
             seed=42
         )
         
@@ -89,7 +90,7 @@ async def process_single_product(item, target_region, target_airport, current_ur
         title_el = await main_info.query_selector(".item_title")
         full_title = (await title_el.inner_text()).strip() if title_el else "제목 없음"
 
-        # 💡 시트상 출발공항이 '없음'이거나 부실하게 들어와도, URL이나 타이틀에서 매칭하여 보정합니다.
+        # 시트상 출발공항이 '없음'이거나 비어 있어도, URL이나 타이틀에서 매칭하여 보정
         if target_airport == "없음" or not target_airport:
             if "[청주출발]" in full_title or "depCityCd=CJJ" in current_url:
                 target_airport = "[청주출발]"
@@ -211,22 +212,23 @@ async def run_crawler():
         source_sheet = source_doc.worksheet("상품리스트")
         
         all_rows = source_sheet.get_all_values()
-        header = all_rows[0]
         data_rows = all_rows[1:]
         
         target_tasks = []
         for row in data_rows:
-            if len(row) >= 1 and row[0].strip().startswith("http"):
-                url = row[0].strip()
-                mobile_url = row[1].strip() if len(row) > 1 else ""
-                region = row[2].strip() if len(row) > 2 and row[2].strip() else "지역명 미상"
-                airport = row[3].strip() if len(row) > 3 and row[3].strip() else "없음"
-                
+            if not row:
+                continue
+            
+            # 4열(A: URL, B: 모바일URL, C: 지역명, D: 출발공항) 기준 안전 패딩
+            padded_row = row + [""] * (4 - len(row))
+            url_clean = padded_row[0].strip()
+            
+            if url_clean.startswith("http"):
                 target_tasks.append({
-                    "url": url,
-                    "mobile_url": mobile_url,
-                    "sheet_region": region,
-                    "sheet_airport": airport
+                    "url": url_clean,
+                    "mobile_url": padded_row[1].strip(),
+                    "sheet_region": padded_row[2].strip() if padded_row[2].strip() else "지역명 미상",
+                    "sheet_airport": padded_row[3].strip() if padded_row[3].strip() else "없음"
                 })
                 
         print(f"✅ 총 {len(target_tasks)}개의 유효 타겟 상품 라인을 확보했습니다.")
@@ -257,6 +259,7 @@ async def run_crawler():
         print(f"⚠️ 기존 시트 로드 실패(첫 실행이거나 시트가 비었음). 전수 LLM 생성 모드로 진행합니다. 원인: {cache_error}")
 
     runtime_titles_dict = {}
+    all_products = []
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
@@ -265,8 +268,6 @@ async def run_crawler():
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
         )
         page = await context.new_page()
-
-        all_products = []
 
         for task in target_tasks:
             current_url = task["url"]
@@ -304,6 +305,7 @@ async def run_crawler():
                         
                         await page.evaluate("window.scrollTo(0, document.body.scrollHeight - 300)")
                         await asyncio.sleep(0.3)
+                        
                         await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
                         
                         current_items = await page.query_selector_all(".prod_list_wrap ul.type > li")
@@ -333,32 +335,35 @@ async def run_crawler():
                 print(f"❌ {current_url} 접속 에러: {e}")
                 continue
 
-        if all_products:
-            print("\n🚀 결과 스프레드시트 업데이트 시작...")
-            
-            target_spreadsheet_id = os.environ.get("TARGET_SPREADSHEET_ID", source_spreadsheet_id)
-            worksheet_name = "github"
+        await browser.close()
+
+    if all_products:
+        print("\n🚀 결과 스프레드시트 업데이트 시작...")
+        
+        target_spreadsheet_id = os.environ.get("TARGET_SPREADSHEET_ID", source_spreadsheet_id)
+        worksheet_name = "github"
+
+        try:
+            df = pd.DataFrame(all_products)
+            column_order = [
+                "ID", "원본상품명", "가격", "URL", "모바일URL", "이미지URL", "지정지역", "출발공항", 
+                "네이버_상품명_1", "네이버_상품명_2", "네이버_상품명_3"
+            ]
+            df = df[column_order]
+            data_to_upload = [df.columns.values.tolist()] + df.values.tolist()
 
             try:
-                df = pd.DataFrame(all_products)
-                column_order = ["ID", "원본상품명", "가격", "URL", "모바일URL", "이미지URL", "지정지역", "출발공항", "네이버_상품명_1", "네이버_상품명_2", "네이버_상품명_3"]
-                df = df[column_order]
-                data_to_upload = [df.columns.values.tolist()] + df.values.tolist()
+                doc = gc.open_by_key(target_spreadsheet_id)
+                sheet = doc.worksheet(worksheet_name)
+                sheet.clear()  
+                
+                sheet.update(range_name='A1', values=data_to_upload)
+                print(f"✅ 성공: 시트 [{doc.title}] ({target_spreadsheet_id}) 업데이트 완료")
+            except Exception as sheet_error:
+                print(f"⚠️ 시트({target_spreadsheet_id}) 업데이트 실패: {sheet_error}")
 
-                try:
-                    doc = gc.open_by_key(target_spreadsheet_id)
-                    sheet = doc.worksheet(worksheet_name)
-                    sheet.clear()  
-                    
-                    sheet.update(range_name='A1', values=data_to_upload)
-                    print(f"✅ 성공: Secret 시트 [{doc.title}] ({target_spreadsheet_id}) 업데이트 완료")
-                except Exception as sheet_error:
-                    print(f"⚠️ 시트({target_spreadsheet_id}) 업데이트 실패: {sheet_error}")
-
-            except Exception as e:
-                print(f"❌ 구글 시트 결과 가공 중 에러: {e}")
-        
-        await browser.close()
+        except Exception as e:
+            print(f"❌ 구글 시트 결과 가공 중 에러: {e}")
 
 if __name__ == "__main__":
     asyncio.run(run_crawler())
