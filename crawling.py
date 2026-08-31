@@ -78,7 +78,7 @@ async def generate_naver_titles_llm(data):
         return f"[Error] {data.get('full_title', '')}", f"[Error] {data.get('region', '')}", f"[Error] {data.get('full_title', '')}"
 
 
-async def process_single_product(item, target_region, target_airport, current_url, existing_titles_dict, runtime_titles_dict):
+async def process_single_product(item, target_region, target_airport, current_url, mobile_url, existing_titles_dict, runtime_titles_dict):
     try:
         main_info = await item.query_selector(":scope > .inr.right")
         img_check = await item.query_selector(":scope > .inr.img")
@@ -169,6 +169,7 @@ async def process_single_product(item, target_region, target_airport, current_ur
             "원본상품명": full_title,
             "가격": int(price) if price else 0,
             "URL": current_url,
+            "모바일URL": mobile_url,
             "이미지URL": img_url,
             "지정지역": target_region,
             "출발공항": target_airport,
@@ -199,14 +200,13 @@ async def run_crawler():
         print(f"❌ 구글 API 인증 실패: {auth_error}")
         return
 
-    print("🌐 스프레드시트에서 URL, 지역, 출발공항 리스트를 불러오는 중...")
+    print("🌐 스프레드시트에서 URL, 모바일URL, 지역, 출발공항 리스트를 불러오는 중...")
     source_spreadsheet_id = os.environ.get("SOURCE_SPREADSHEET_ID")
     if not source_spreadsheet_id:
         print("❌ 에러: 환경 변수 'SOURCE_SPREADSHEET_ID'가 설정되어 있지 않습니다.")
         return
     
     try:
-        source_doc = gc.open_by_key(source_spreadsheet_id)
         source_doc = gc.open_by_key(source_spreadsheet_id)
         source_sheet = source_doc.worksheet("상품리스트")
         
@@ -218,11 +218,13 @@ async def run_crawler():
         for row in data_rows:
             if len(row) >= 1 and row[0].strip().startswith("http"):
                 url = row[0].strip()
-                region = row[1].strip() if len(row) > 1 and row[1].strip() else "지역명 미상"
-                airport = row[2].strip() if len(row) > 2 and row[2].strip() else "없음"
+                mobile_url = row[1].strip() if len(row) > 1 else ""
+                region = row[2].strip() if len(row) > 2 and row[2].strip() else "지역명 미상"
+                airport = row[3].strip() if len(row) > 3 and row[3].strip() else "없음"
                 
                 target_tasks.append({
                     "url": url,
+                    "mobile_url": mobile_url,
                     "sheet_region": region,
                     "sheet_airport": airport
                 })
@@ -268,16 +270,15 @@ async def run_crawler():
 
         for task in target_tasks:
             current_url = task["url"]
+            mobile_url = task["mobile_url"]
             target_region = task["sheet_region"]
             target_airport = task["sheet_airport"]
             
             try:
                 print(f"🔄 {target_region} (출발: {target_airport}) 페이지 로딩 중...")
-                # 💡 [핵심 수정] networkidle 대신 구조가 파싱되면 즉시 통과하는 domcontentloaded로 타임아웃 방지
                 await page.goto(current_url, wait_until="domcontentloaded", timeout=30000)
                 
                 try:
-                    # 🎯 대신 뒤에서 비동기로 수집되는 상품 총 개수 태그가 나타날 때까지만 부분 대기합니다.
                     await page.wait_for_selector(".option_wrap.result .count em", timeout=10000)
                 except Exception:
                     pass
@@ -315,7 +316,7 @@ async def run_crawler():
                 print(f"📦 [확인] 최종 수집된 타겟 엘리먼트 총 {len(final_items)}개! 조건부 병렬 처리를 시작합니다.")
                 
                 tasks = [
-                    process_single_product(item, target_region, target_airport, current_url, existing_titles_dict, runtime_titles_dict) 
+                    process_single_product(item, target_region, target_airport, current_url, mobile_url, existing_titles_dict, runtime_titles_dict) 
                     for item in final_items
                 ]
                 
@@ -340,7 +341,7 @@ async def run_crawler():
 
             try:
                 df = pd.DataFrame(all_products)
-                column_order = ["ID", "원본상품명", "가격", "URL", "이미지URL", "지정지역", "출발공항", "네이버_상품명_1", "네이버_상품명_2", "네이버_상품명_3"]
+                column_order = ["ID", "원본상품명", "가격", "URL", "모바일URL", "이미지URL", "지정지역", "출발공항", "네이버_상품명_1", "네이버_상품명_2", "네이버_상품명_3"]
                 df = df[column_order]
                 data_to_upload = [df.columns.values.tolist()] + df.values.tolist()
 
@@ -349,8 +350,7 @@ async def run_crawler():
                     sheet = doc.worksheet(worksheet_name)
                     sheet.clear()  
                     
-                    # 💡 [gspread 최신 규격 반영] range_name을 첫 인자로, 데이터를 두 번째 인자로 배치
-                    sheet.update('A1', data_to_upload)
+                    sheet.update(range_name='A1', values=data_to_upload)
                     print(f"✅ 성공: Secret 시트 [{doc.title}] ({target_spreadsheet_id}) 업데이트 완료")
                 except Exception as sheet_error:
                     print(f"⚠️ 시트({target_spreadsheet_id}) 업데이트 실패: {sheet_error}")
