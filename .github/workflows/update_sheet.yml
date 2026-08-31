@@ -1,9 +1,6 @@
 name: Google Drive Sync & Hotel Data Update
 
 on:
-  schedule:
-    # 매일 한국 시간 기준 아침 08:30 실행 (UTC 23:30)
-    - cron: '30 23 * * *'
   workflow_dispatch: # GitHub 웹 UI에서 수동 실행 가능
 
 jobs:
