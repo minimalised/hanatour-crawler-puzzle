@@ -240,15 +240,20 @@ async def run_crawler():
     
     target_tasks = []
     for row in data_rows:
-        if len(row) >= 1:
-            url_clean = row[0].strip()  
-            if url_clean.startswith("http"):
-                target_tasks.append({
-                    "url": url_clean,
-                    "mobile_url": row[1].strip() if len(row) > 1 else "",
-                    "sheet_region": row[2].strip() if len(row) > 2 and row[2].strip() else "지역명 미상",
-                    "sheet_airport": row[3].strip() if len(row) > 3 and row[3].strip() else "없음"
-                })
+        if not row:
+            continue
+        
+        # 4개 열(URL, 모바일URL, 지역명, 출발공항) 기준으로 패딩 처리
+        padded_row = row + [""] * (4 - len(row))
+        url_clean = padded_row[0].strip()
+        
+        if url_clean.startswith("http"):
+            target_tasks.append({
+                "url": url_clean,
+                "mobile_url": padded_row[1].strip(),
+                "sheet_region": padded_row[2].strip() if padded_row[2].strip() else "지역명 미상",
+                "sheet_airport": padded_row[3].strip() if padded_row[3].strip() else "없음"
+            })
                 
     print(f"✅ 총 {len(target_tasks)}개의 유효 타겟 상품 라인을 확보했습니다.")
 
