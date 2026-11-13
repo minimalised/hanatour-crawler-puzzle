@@ -1,0 +1,51 @@
+name: Daily Hanatour Crawling (상품리스트 + 상품리스트2)
+
+# 상품리스트 → github (crawling.py), 상품리스트2 → github2 (crawling2.py)를
+# 하나의 액션에서 순서대로 실행합니다. (기존 crawler.yml, crawler2.yml 통합)
+
+on:
+  schedule:
+    - cron: '0 21 * * *'  # 매일 한국 시간 오전 6시 자동 실행
+  workflow_dispatch:      # 수동 실행 버튼 활성화
+
+concurrency:
+  group: hanatour-crawler-1-2
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    container:
+      image: mcr.microsoft.com/playwright:v1.62.0-noble
+
+    env:
+      GOOGLE_JSON_RAW: ${{ secrets.GOOGLE_JSON_RAW }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      SOURCE_SPREADSHEET_ID: ${{ secrets.SOURCE_SPREADSHEET_ID }}
+      TARGET_SPREADSHEET_ID: ${{ secrets.TARGET_SPREADSHEET_ID }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pandas gspread google-auth playwright playwright-stealth openai
+          # pip로 받은 playwright 버전에 맞는 chromium 확보 (이미 있으면 바로 넘어감)
+          python -m playwright install chromium
+
+      # 1. 상품리스트 → github
+      - name: Run crawler (상품리스트 → github)
+        run: python -u crawling.py
+
+      # 2. 상품리스트2 → github2 (1번이 실패해도 실행)
+      - name: Run crawler (상품리스트2 → github2)
+        if: always()
+        run: python -u crawling2.py
