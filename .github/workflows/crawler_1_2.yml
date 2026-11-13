@@ -17,7 +17,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 180
     container:
-      image: mcr.microsoft.com/playwright:v1.62.0-noble
+      # v1.62 이미지 + setup-python 3.11 조합은 python에 ssl 모듈이 없어 pip 설치가 실패함.
+      # 정상 동작이 확인된 기존 crawler.yml 조합(v1.46 이미지 + Python 3.10)으로 고정.
+      image: mcr.microsoft.com/playwright:v1.46.0-noble
 
     env:
       GOOGLE_JSON_RAW: ${{ secrets.GOOGLE_JSON_RAW }}
@@ -32,7 +34,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.10'
 
       - name: Install dependencies
         run: |
